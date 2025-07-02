@@ -16,13 +16,13 @@ class LLMProvider:
         self.anthropic_chat_model = ChatAnthropic(
             model=settings.ANTHROPIC_MODEL,
             temperature=1,
-            max_tokens=100_000,
+            max_tokens=64_000,
             api_key=settings.ANTHROPIC_API_KEY,
             default_headers={
                 "anthropic-beta": "interleaved-thinking-2025-05-14,extended-cache-ttl-2025-04-11",
                 "anthropic-version": "2023-06-01"
             },
-            thinking={"type": "enabled", "budget_tokens": 40_000},
+            thinking={"type": "enabled", "budget_tokens": 20_000},
         )
 
         # 2. Anthropic의 네이티브 웹 검색 도구 정의
