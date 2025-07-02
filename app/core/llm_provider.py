@@ -22,7 +22,7 @@ class LLMProvider:
                 "anthropic-beta": "interleaved-thinking-2025-05-14,extended-cache-ttl-2025-04-11",
                 "anthropic-version": "2023-06-01"
             },
-            thinking={"type": "enabled", "budget_tokens": 20_000},
+            thinking={"type": "enabled", "budget_tokens": 40_000},
         )
 
         # 2. Anthropic의 네이티브 웹 검색 도구 정의
@@ -32,41 +32,70 @@ class LLMProvider:
             "max_uses": 10,
 
             "allowed_domains": [
+                # 프롬프트 수정 전 까지는 나머지 사이트들 전부 주석처리 ( 최신 내용을 못 가져옴 )
+                # page_age로 필터링 하는게 좋을 듯 함.
+
+                # export type RawResponseMessageContent = {
+                #     signature?:   string
+                #     thinking?:    string
+                #     type:         string
+                #     id?:          string
+                #     input?:       Input
+                #     name?:        string
+                #     content?:     Content[]
+                #     tool_use_id?: string
+                #     text?:        string
+                # }
+
+                # export type Content= {
+                #     encrypted_content: string
+                #     page_age:          string
+                #     title:             string
+                #     type:              Type
+                #     url:               string
+                # }
+
+                # export type Type = "web_search_result"
+
+                # export type Input= {
+                #     query: string
+                # }
+
                 # 글로벌 사이트들
                 "www.cnbc.com/shipping/",
-                "www.supplychaindive.com/",
-                "www.supplychainbrain.com/",
-                "supplychaindigital.com/",
-                "www.globaltrademag.com/",
-                "www.freightwaves.com/",
-                "www.maritime-executive.com/",
-                "aircargoworld.com/",
-                "theloadstar.com/",
+                # "www.supplychaindive.com/",
+                # "www.supplychainbrain.com/",
+                # "supplychaindigital.com/",
+                # "www.globaltrademag.com/",
+                # "www.freightwaves.com/",
+                # "www.maritime-executive.com/",
+                # "aircargoworld.com/",
+                # "theloadstar.com/",
                 "finance.yahoo.com/news/",
-                "indiashippingnews.com/",
-                "www.ajot.com/",
-                "www.scdigest.com/",
-                "www.inboundlogistics.com/",
-                "www.railjournal.com/",
-                "www.transportjournal.com/",
-                "landline.media/",
-                "www.aircargoweek.com/",
-                "www.automotivelogistics.media/",
-                "breakbulk.com/",
-                "gcaptain.com/",
-                "www.marinelink.com/",
-                "splash247.com/",
+                # "indiashippingnews.com/",
+                # "www.ajot.com/",
+                # "www.scdigest.com/",
+                # "www.inboundlogistics.com/",
+                # "www.railjournal.com/",
+                # "www.transportjournal.com/",
+                # "landline.media/",
+                # "www.aircargoweek.com/",
+                # "www.automotivelogistics.media/",
+                # "breakbulk.com/",
+                # "gcaptain.com/",
+                # "www.marinelink.com/",
+                # "splash247.com/",
 
                 # 한국 사이트들
-                "dream.kotra.or.kr/kotranews/index.do",
-                "www.kita.net/board/totalTradeNews/totalTradeNewsList.do",
-                "www.kita.net/mberJobSport/shippers/board/list.do",
-                "www.klnews.co.kr",
-                "www.kcnews.org/",
-                "www.maritimepress.co.kr",
-                "www.weeklytrade.co.kr/",
-                "www.shippingnewsnet.com",
-                "www.cargotimes.net/"
+                # "dream.kotra.or.kr/kotranews/index.do",
+                # "www.kita.net/board/totalTradeNews/totalTradeNewsList.do",
+                # "www.kita.net/mberJobSport/shippers/board/list.do",
+                # "www.klnews.co.kr",
+                # "www.kcnews.org/",
+                # "www.maritimepress.co.kr",
+                # "www.weeklytrade.co.kr/",
+                # "www.shippingnewsnet.com",
+                # "www.cargotimes.net/"
             ],
         }
 
