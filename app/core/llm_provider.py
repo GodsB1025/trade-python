@@ -33,33 +33,7 @@ class LLMProvider:
 
             "allowed_domains": [
                 # 프롬프트 수정 전 까지는 나머지 사이트들 전부 주석처리 ( 최신 내용을 못 가져옴 )
-                # page_age로 필터링 하는게 좋을 듯 함.
-
-                # export type RawResponseMessageContent = {
-                #     signature?:   string
-                #     thinking?:    string
-                #     type:         string
-                #     id?:          string
-                #     input?:       Input
-                #     name?:        string
-                #     content?:     Content[]
-                #     tool_use_id?: string
-                #     text?:        string
-                # }
-
-                # export type Content= {
-                #     encrypted_content: string
-                #     page_age:          string
-                #     title:             string
-                #     type:              Type
-                #     url:               string
-                # }
-
-                # export type Type = "web_search_result"
-
-                # export type Input= {
-                #     query: string
-                # }
+                # 할 일.md 파일 참조.
 
                 # 글로벌 사이트들
                 "www.cnbc.com/shipping/",
