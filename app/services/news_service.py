@@ -106,7 +106,7 @@ class NewsService:
         'content' 블록에서 정확한 URL을 가져와 결합하여 환각(hallucination)을 방지.
         """
         now_utc = datetime.now(timezone.utc)
-        two_days_ago_utc = now_utc - timedelta(days=2)
+        two_days_ago_utc = now_utc - timedelta(days=3)
         date_format = "%Y-%m-%d"
         current_date_str = now_utc.strftime(date_format)
         start_date_str = two_days_ago_utc.strftime(date_format)
@@ -119,8 +119,8 @@ class NewsService:
             SystemMessage(content="You are a top-tier trade analyst. Your primary output language is Korean.\n"
                           f"Today's date is {current_date_str}. Your mission is to perform these steps in order within a single turn:\n\n"
                           "**Step 1: Web Search**\n"
-                          "First, use your `web_search` tool to find the top 5 most recent and significant news articles on global trade "
-                          f"published between {start_date_str} and {current_date_str}. "
+                          "First, use your `web_search` tool to find recent and significant news articles on global trade "
+                          f"only published between {start_date_str} and {current_date_str}. "
                           "Focus on tariffs, regulations, and supply chain disruptions relevant to South Korean SMEs.\n\n"
                           "**Step 2: Analyze and Format to JSON**\n"
                           "After you get the search results, you MUST analyze them and create a single, raw JSON object. Do not output any other text, just the JSON. "
