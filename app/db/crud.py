@@ -8,6 +8,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime
 from sqlalchemy import desc, and_, or_
+from hashlib import sha256
 
 # SQLAlchemy 모델과 Pydantic 스키마를 임포트합니다.
 # 참고: 실제 프로젝트에서는 models.py 또는 유사한 파일에 SQLAlchemy 모델이 정의되어 있어야 합니다.
@@ -95,6 +96,48 @@ class CRUDTradeNews:
 
 
 trade_news = CRUDTradeNews()
+
+
+class CRUDUpdateFeed:
+    async def get_by_bookmark_and_content(
+        self, db: AsyncSession, *, user_id: int, target_value: str, content: str
+    ) -> Optional[db_models.UpdateFeed]:
+        """
+        사용자 ID, 대상 값, 콘텐츠 내용을 기반으로 기존 업데이트 피드가 있는지 조회.
+        중복된 내용의 업데이트 생성을 방지하기 위해 사용.
+        """
+        query = select(db_models.UpdateFeed).where(
+            and_(
+                db_models.UpdateFeed.user_id == user_id,
+                db_models.UpdateFeed.target_value == target_value,
+                db_models.UpdateFeed.content == content,
+            )
+        )
+        result = await db.execute(query)
+        return result.scalars().first()
+
+    async def create_from_bookmark(
+        self, db: AsyncSession, *, bookmark: db_models.Bookmark, summary: str
+    ) -> db_models.UpdateFeed:
+        """
+        북마크 정보와 요약 내용을 바탕으로 새로운 모니터링 업데이트 피드를 생성.
+        """
+        db_feed = db_models.UpdateFeed(
+            user_id=bookmark.user_id,
+            feed_type=db_models.FeedType.POLICY_UPDATE,  # 모니터링으로 인한 생성은 정책 업데이트로 분류
+            target_type=db_models.TargetType(bookmark.type.value),
+            target_value=bookmark.target_value,
+            title=f"'{bookmark.display_name}'에 대한 새로운 업데이트",
+            content=summary,
+            importance=db_models.ImportanceLevel.MEDIUM
+        )
+        db.add(db_feed)
+        await db.flush()
+        await db.refresh(db_feed)
+        return db_feed
+
+
+update_feed = CRUDUpdateFeed()
 
 
 async def get_active_bookmarks(db: AsyncSession) -> List[db_models.Bookmark]:

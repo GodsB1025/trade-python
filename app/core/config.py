@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyUrl, RedisDsn, Field
+from pydantic import AnyUrl, RedisDsn, Field, AnyHttpUrl, EmailStr
 from typing import List, Union
 
 
@@ -26,16 +26,36 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = Field(..., env="DATABASE_URL")
 
-    # Redis
-    REDIS_HOST: str = "db.k-developer.pro"
-    REDIS_PORT: int = 6379
-    REDIS_USERNAME: str = "trade"
-    REDIS_PASSWORD: str = "your-redis-password-here"
+    # Redis - 환경변수 기반 설정으로 변경
+    REDIS_HOST: str = Field(default="localhost", env="REDIS_HOST")
+    REDIS_PORT: int = Field(default=6379, env="REDIS_PORT")
+    REDIS_USERNAME: str | None = Field(default=None, env="REDIS_USERNAME")
+    REDIS_PASSWORD: str | None = Field(default=None, env="REDIS_PASSWORD")
+    REDIS_DB: int = Field(default=0, env="REDIS_DB")
     REDIS_TIMEOUT: int = 2000  # milliseconds
 
     @property
-    def redis_dsn(self) -> RedisDsn:
-        return f"redis://{self.REDIS_USERNAME}:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}"
+    def redis_dsn(self) -> str:
+        """
+        Redis DSN 생성
+        개발 환경에서는 인증 없는 로컬 Redis 사용
+        운영 환경에서는 인증이 필요한 Redis 사용
+        """
+        # 인증 정보가 있는 경우
+        if self.REDIS_USERNAME and self.REDIS_PASSWORD:
+            return f"redis://{self.REDIS_USERNAME}:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+        # 인증 정보가 없는 경우 (개발 환경)
+        else:
+            return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+
+    # Monitoring Settings
+    MONITORING_JOB_LOCK_KEY: str = "monitoring:job:lock"
+    MONITORING_JOB_LOCK_TIMEOUT: int = 3600  # 1 hour
+    MONITORING_CONCURRENT_REQUESTS_LIMIT: int = 5
+    MONITORING_RPM_LIMIT: int = Field(
+        60, description="모니터링 시 Claude API에 대한 분당 요청 수 제한")
+    MONITORING_NOTIFICATION_QUEUE_KEY_PREFIX: str = "daily_notification:queue:"
+    MONITORING_NOTIFICATION_DETAIL_KEY_PREFIX: str = "daily_notification:detail:"
 
     # AI Model API Keys & Settings
     ANTHROPIC_API_KEY: str = Field(..., alias="CLAUDE_API_KEY")
@@ -44,6 +64,12 @@ class Settings(BaseSettings):
 
     # Web Search Settings
     WEB_SEARCH_ENABLED: bool = True
+
+    # Logging Settings
+    LOG_FILE_PATH: str = "logs/app.log"
+    LOG_ROTATION_WHEN: str = "midnight"
+    LOG_ROTATION_INTERVAL: int = 1
+    LOG_ROTATION_BACKUP_COUNT: int = 7
 
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [

@@ -46,8 +46,8 @@ class NewsService:
 
     def __init__(self):
         # llm_provider에서 웹 검색 기능이 바인딩된 모델을 가져옴
-        self.llm_with_native_search = llm_provider.llm_with_native_search
-        self.anthropic_chat_model = llm_provider.anthropic_chat_model
+        self.llm_with_native_search = llm_provider.news_llm_with_native_search
+        self.anthropic_chat_model = llm_provider.news_chat_model
 
     def _create_news_dtos_from_response(
         self,

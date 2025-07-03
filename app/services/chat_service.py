@@ -27,8 +27,8 @@ class ChatService:
         self.chat_history_service = ChatHistoryService(self.db_session)
         # LLMProvider로부터 필요한 컴포넌트를 가져옴
         self.vector_store = llm_provider.vector_store
-        self.anthropic_chat_model = llm_provider.anthropic_chat_model
-        self.llm_with_native_search = llm_provider.llm_with_native_search
+        self.anthropic_chat_model = llm_provider.news_chat_model
+        self.llm_with_native_search = llm_provider.news_llm_with_native_search
 
     async def get_conversational_chain(self) -> RunnableWithMessageHistory:
         """

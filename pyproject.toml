@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
-    "pydantic>=2.10.0",
+    "pydantic[email]>=2.10.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.1.1",
     # AI & LangChain
@@ -28,6 +28,11 @@ dependencies = [
     "sse-starlette>=2.3.6",
     "structlog>=25.4.0",
     "asgi-correlation-id[uuid]>=4.3.4",
+    "redis>=6.2.0",
+    "psycopg2>=2.9.10",
+    "bs4>=0.0.2",
+    "dateparser>=1.2.0",
+    "aiolimiter>=1.1.0",
 ]
 
 [tool.uv]
@@ -60,3 +65,6 @@ addopts = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "function"
+
+[tool.uv.sources]
+"fastapi-realworld-example-app" = { url = "https://files.pythonhosted.org/packages/99/0f/c559888126d26a27ed315054f76632f01f01db0273845f782a20b8f4974f/fastapi_realworld_example_app-0.1.0-py3-none-any.whl" }
