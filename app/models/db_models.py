@@ -5,7 +5,7 @@ import enum
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint,
-    Enum as SQLAlchemyEnum, Computed, Index, ForeignKeyConstraint, Numeric, Float, text, and_
+    Enum as SQLAlchemyEnum, Computed, Index, ForeignKeyConstraint, Numeric, Float, text, and_, desc
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, BIGINT, ARRAY
 from sqlalchemy.orm import relationship, declarative_base, Mapped, foreign
@@ -64,20 +64,26 @@ class User(Base):
         "UpdateFeed", back_populates="user", cascade="all, delete-orphan")
 
 
-class News(Base):
-    """뉴스 테이블 모델 - 구현계획.md v6.3 기준"""
-    __tablename__ = "news"
+class TradeNews(Base):
+    """무역 뉴스 테이블 모델 (`스키마.md` 기준)"""
+    __tablename__ = "trade_news"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
     title = Column(String(500), nullable=False)
-    source_url = Column(String(1000), nullable=False)
+    summary = Column(Text)
     source_name = Column(String(200), nullable=False)
-    published_at = Column(DateTime(timezone=True), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    published_at = Column(DateTime, nullable=False)
+    source_url = Column(String(1000), nullable=True)
+    category = Column(String(50), index=True, nullable=True)
+    priority = Column(Integer, nullable=False, default=1)
+    fetched_at = Column(DateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
-        Index('idx_news_published_at', published_at.desc()),
-        Index('idx_news_created_at', created_at.desc()),
+        UniqueConstraint('title', 'published_at',
+                         name='uq_trade_news_title_published_at'),
+        Index('idx_trade_news_priority', 'priority', desc('published_at')),
+        Index('idx_trade_news_published', desc('published_at')),
+        Index('idx_trade_news_category', 'category'),
     )
 
 
@@ -288,31 +294,4 @@ class Langchain4jEmbedding(Base):
     __table_args__ = (
         Index('idx_langchain4j_embedding_vector', 'embedding',
               postgresql_using='hnsw', postgresql_with={'m': 16, 'ef_construction': 64}),
-    )
-
-
-class TradeNewsCache(Base):
-    """무역 뉴스 캐시 테이블 모델"""
-    __tablename__ = 'trade_news_cache'
-
-    id = Column(BIGINT, primary_key=True, autoincrement=True)
-    title = Column(String(500), nullable=False)
-    summary = Column(Text)
-    source_name = Column(String(200), nullable=False)
-    source_url = Column(String(1000), nullable=False)
-    published_at = Column(DateTime, nullable=False)
-    category = Column(String(50), index=True)
-    priority = Column(Integer, nullable=False, default=1)
-    source_api = Column(String(100), nullable=False)
-    fetched_at = Column(DateTime, nullable=False, server_default=func.now())
-    expires_at = Column(DateTime, nullable=False)
-    is_active = Column(Boolean, nullable=False, default=True)
-    created_at = Column(DateTime, server_default=func.now())
-
-    __table_args__ = (
-        UniqueConstraint('source_url', 'fetched_at',
-                         name='_source_url_fetched_at_uc'),
-        Index('idx_trade_news_active', 'is_active', 'expires_at'),
-        Index('idx_trade_news_priority', 'priority', published_at.desc()),
-        Index('idx_trade_news_published', published_at.desc()),
     )

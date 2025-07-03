@@ -1,3 +1,4 @@
+import anthropic
 from langchain_anthropic import ChatAnthropic
 from langchain_voyageai import VoyageAIEmbeddings
 from langchain_postgres.vectorstores import PGVector
@@ -13,16 +14,18 @@ class LLMProvider:
 
     def __init__(self):
         # 1. 앤트로픽 챗 모델 초기화
-        self.anthropic_chat_model = ChatAnthropic(
+        base_llm = ChatAnthropic(
             model=settings.ANTHROPIC_MODEL,
             temperature=1,
-            max_tokens=64_000,
+            max_tokens=30_000,
             api_key=settings.ANTHROPIC_API_KEY,
             default_headers={
                 "anthropic-beta": "interleaved-thinking-2025-05-14,extended-cache-ttl-2025-04-11",
                 "anthropic-version": "2023-06-01"
             },
-            thinking={"type": "enabled", "budget_tokens": 40_000},
+            betas=["interleaved-thinking-2025-05-14",
+                   "extended-cache-ttl-2025-04-11"],
+            thinking={"type": "enabled", "budget_tokens": 10_000},
         )
 
         # 2. Anthropic의 네이티브 웹 검색 도구 정의
@@ -30,6 +33,7 @@ class LLMProvider:
             "type": "web_search_20250305",
             "name": "web_search",
             "max_uses": 10,
+            "cache_control": {"type": "ephemeral"},
 
             "allowed_domains": [
                 # 프롬프트 수정 전 까지는 나머지 사이트들 전부 주석처리 ( 최신 내용을 못 가져옴 )
@@ -74,17 +78,29 @@ class LLMProvider:
         }
 
         # 3. 모델에 네이티브 웹 검색 기능 바인딩
-        self.llm_with_native_search = self.anthropic_chat_model.bind_tools(
+        llm_with_tools_bound = base_llm.bind_tools(
             tools=[self.native_web_search_tool]
         )
 
-        # 4. Voyage AI 임베딩 모델 초기화
+        # 4. 재시도 로직 정의 및 적용
+        # 529 과부하 에러와 같은 특정 오류에 대해 지수 백오프를 사용한 재시도를 적용
+        retry_config = {
+            "stop_after_attempt": 5,
+            "wait_exponential_jitter": True,  # 지수적으로 대기 시간 증가 (jitter 포함)
+            "retry_if_exception_type": (anthropic.InternalServerError,),
+        }
+
+        self.anthropic_chat_model = base_llm.with_retry(**retry_config)
+        self.llm_with_native_search = llm_with_tools_bound.with_retry(
+            **retry_config)
+
+        # 5. Voyage AI 임베딩 모델 초기화
         self.embeddings = VoyageAIEmbeddings(
             voyage_api_key=settings.VOYAGE_API_KEY,
             model="voyage-large-2-instruct"
         )
 
-        # 5. PGVector 벡터 저장소 초기화
+        # 6. PGVector 벡터 저장소 초기화
         self.vector_store = PGVector(
             embeddings=self.embeddings,
             collection_name="hscode_vectors",

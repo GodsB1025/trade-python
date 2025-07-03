@@ -216,30 +216,28 @@ class SSEMemeberRecordSaved(BaseModel):
 # DB 모델과 동기화된 Pydantic 스키마 (v6.3 기준)
 # ==================================
 
-# --- News 스키마 ---
+# --- TradeNews 스키마 ---
 
-class NewsBase(BaseModel):
-    """뉴스 기본 스키마"""
+class TradeNewsBase(BaseModel):
+    """무역 뉴스 기본 스키마"""
     title: str = Field(..., max_length=500)
-    source_url: HttpUrl
+    summary: Optional[str] = None
     source_name: str = Field(..., max_length=200)
     published_at: datetime
+    source_url: Optional[HttpUrl] = None
+    category: Optional[str] = Field(None, max_length=50)
+    priority: int = 1
+    fetched_at: datetime
 
 
-class NewsCreate(NewsBase):
-    """뉴스 생성용 스키마"""
+class TradeNewsCreate(TradeNewsBase):
+    """무역 뉴스 생성용 스키마"""
     pass
 
 
-class NewsList(BaseModel):
-    """뉴스 목록을 위한 Pydantic 모델"""
-    news_items: List[NewsCreate] = Field(..., description="생성된 뉴스 기사 목록")
-
-
-class News(NewsBase):
-    """DB 조회용 뉴스 스키마"""
+class TradeNews(TradeNewsBase):
+    """DB 조회용 무역 뉴스 스키마"""
     id: int
-    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -368,3 +366,8 @@ class ChatSession(ChatSessionBase):
 
     class Config:
         from_attributes = True
+
+
+# ==================================
+# 뉴스 기사 스키마
+# ==================================

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime
-from sqlalchemy import desc
+from sqlalchemy import desc, and_, or_
 
 # SQLAlchemy 모델과 Pydantic 스키마를 임포트합니다.
 # 참고: 실제 프로젝트에서는 models.py 또는 유사한 파일에 SQLAlchemy 모델이 정의되어 있어야 합니다.
@@ -16,24 +16,46 @@ from ..models import db_models
 from ..models import schemas
 
 
-async def create_news_items(db: AsyncSession, news_items: List[schemas.NewsCreate]) -> List[db_models.News]:
+async def create_news_articles(
+    db: AsyncSession, news_items: List[schemas.TradeNewsCreate]
+) -> List[db_models.TradeNews]:
     """
-    여러 개의 새로운 뉴스 항목을 데이터베이스에 비동기적으로 생성.
-    `구현계획.md` v6.3 및 SQLAlchemy 2.0 비동기 모범 사례에 맞게 수정됨.
+    여러 개의 새로운 무역 뉴스 항목을 데이터베이스에 비동기적으로 생성.
     """
-    db_news_list = [
-        db_models.News(
-            title=item.title,
-            source_url=str(item.source_url),
-            source_name=item.source_name,
-            published_at=item.published_at,
-        )
-        for item in news_items
-    ]
+    if not news_items:
+        return []
+
+    # DB 컬럼은 timezone-naive이므로, 입력된 datetime의 timezone 정보를 제거
+    processed_news_items = []
+    for item in news_items:
+        update_data = {}
+        if item.published_at and item.published_at.tzinfo:
+            update_data["published_at"] = item.published_at.replace(
+                tzinfo=None)
+        if hasattr(item, "fetched_at") and item.fetched_at and item.fetched_at.tzinfo:
+            update_data["fetched_at"] = item.fetched_at.replace(tzinfo=None)
+
+        if update_data:
+            processed_news_items.append(item.model_copy(update=update_data))
+        else:
+            processed_news_items.append(item)
+
+    db_news_list = []
+    for item in processed_news_items:
+        dumped_item = item.model_dump()
+
+        # HttpUrl 타입은 명시적으로 str으로 변환
+        if dumped_item.get("source_url") is not None:
+            dumped_item["source_url"] = str(dumped_item["source_url"])
+
+        db_news = db_models.TradeNews(**dumped_item)
+        db_news_list.append(db_news)
+
     db.add_all(db_news_list)
     await db.flush()
-    # flush는 DB에 변경사항을 보내고 PK 같은 정보를 동기화하지만, commit은 하지 않음.
-    # 트랜잭션 제어는 상위 서비스 계층에서 담당.
+    # flush 후에 db_news_list의 각 인스턴스를 refresh하여 DB의 최신 상태를 반영
+    for db_news in db_news_list:
+        await db.refresh(db_news)
     return db_news_list
 
 

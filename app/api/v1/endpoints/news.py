@@ -34,7 +34,7 @@ async def generate_trade_news(
             }
 
         # 생성된 뉴스를 DB에 저장
-        await crud.create_news_items(db, news_items=generated_news_list)
+        await crud.create_news_articles(db, news_items=generated_news_list)
         await db.commit()  # 변경사항을 데이터베이스에 최종 커밋
 
         return {

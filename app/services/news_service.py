@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, HttpUrl, TypeAdapter
 
 from app.core.config import settings
 from app.core.llm_provider import llm_provider
-from app.models.schemas import NewsCreate
+from app.models.schemas import TradeNewsCreate
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class NewsService:
             logger.warning(f"Failed to fetch content from URL {url}: {e}")
             return ""
 
-    async def create_news_via_claude(self) -> List[NewsCreate]:
+    async def create_news_via_claude(self) -> List[TradeNewsCreate]:
         """
         Claude의 웹 검색 기능과 API의 citation 메타데이터를 결합하여
         신뢰성 높은 최신 무역 뉴스를 생성.
@@ -106,34 +106,38 @@ class NewsService:
         'content' 블록에서 정확한 URL을 가져와 결합하여 환각(hallucination)을 방지.
         """
         now_utc = datetime.now(timezone.utc)
-        two_days_ago_utc = now_utc - timedelta(days=3)
+        three_days_ago_utc = now_utc - timedelta(days=3)
         date_format = "%Y-%m-%d"
         current_date_str = now_utc.strftime(date_format)
-        start_date_str = two_days_ago_utc.strftime(date_format)
+        start_date_str = three_days_ago_utc.strftime(date_format)
 
         logger.info(
             f"News generation started for period: {start_date_str} ~ {current_date_str}")
 
-        # 프롬프트 수정: LLM이 source_url을 생성하지 않고, JSON만 출력하도록 명확히 지시.
         prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="You are a top-tier trade analyst. Your primary output language is Korean.\n"
-                          f"Today's date is {current_date_str}. Your mission is to perform these steps in order within a single turn:\n\n"
-                          "**Step 1: Web Search**\n"
-                          "First, use your `web_search` tool to find recent and significant news articles on global trade "
-                          f"only published between {start_date_str} and {current_date_str}. "
-                          "Focus on tariffs, regulations, and supply chain disruptions relevant to South Korean SMEs.\n\n"
-                          "**Step 2: Analyze and Format to JSON**\n"
-                          "After you get the search results, you MUST analyze them and create a single, raw JSON object. Do not output any other text, just the JSON. "
-                          "It is CRITICAL that you follow these rules:\n"
-                          "1.  **Maintain Strict Order**: The order of the news items you create MUST EXACTLY correspond to the order of the web search results. Do not change the order.\n"
-                          "2.  **Field Accuracy**: Populate the fields based *only* on the content of each specific article. DO NOT generate URLs.\n"
-                          "3.  **JSON Schema**: The final output MUST be a single raw JSON object (not a string, not wrapped in markdown). The schema should be:\n"
-                          "    `{{\"news_items\": [{{\"title\": \"...\", \"summary\": \"...\", \"source_name\": \"...\", \"published_at\": \"...\"}}]}}`\n"
-                          "    - `title`: A professional Korean title.\n"
-                          "    - `summary`: A concise Korean summary (2-3 sentences) of the impact on Korean businesses.\n"
-                          "    - `source_name`: The news source's name. Translate major outlets (e.g., 'Reuters' -> '로이터').\n"
-                          "    - `published_at`: The exact publication date from the article (ISO 8601 format).\n\n"
-                          "Now, proceed with the web search and then generate the final JSON object.", additional_kwargs={"cache-control": {"type": "ephemeral"}}),
+            SystemMessage(
+                content="You are a top-tier trade analyst. Your primary output language is Korean.\n"
+                        f"Today's date is {current_date_str}. Your mission is to perform these steps in order within a single turn:\n\n"
+                        "**Step 1: Web Search**\n"
+                        "First, use your `web_search` tool to find recent and significant news articles on global trade "
+                        f"only published between {start_date_str} and {current_date_str}. "
+                        "Focus on tariffs, regulations, and supply chain disruptions relevant to South Korean SMEs.\n\n"
+                        "**Step 2: Analyze and Format to JSON**\n"
+                        "After you get the search results, you MUST analyze them and create a single, raw JSON object. Do not output any other text, just the JSON. "
+                        "It is CRITICAL that you follow these rules:\n"
+                        "1.  **Maintain Strict Order**: The order of the news items you create MUST EXACTLY correspond to the order of the web search results. Do not change the order.\n"
+                        "2.  **Field Accuracy**: Populate the fields based *only* on the content of each specific article. DO NOT generate URLs.\n"
+                        "3.  **JSON Schema**: The final output MUST be a single raw JSON object. The schema should be:\n"
+                        "    `{{\"news_items\": [{{\"title\": \"...\", \"summary\": \"...\", \"source_name\": \"...\", \"published_at\": \"...\", \"category\": \"...\", \"priority\": ...}}]}}`\n"
+                        "    - `title`: A professional Korean title.\n"
+                        "    - `summary`: A concise Korean summary (2-3 sentences) of the impact on Korean businesses.\n"
+                        "    - `source_name`: The news source's name. Translate major outlets (e.g., 'Reuters' -> '로이터').\n"
+                        "    - `published_at`: The exact publication date from the article (ISO 8601 format).\n"
+                        "    - `category`: Classify the article into one of these categories: 'Tariff', 'Regulation', 'SupplyChain', 'TradeAgreement', 'Geopolitics', 'Technology', 'Environment', 'General'.\n"
+                        "    - `priority`: Assign an integer priority: 3 for critical impact, 2 for moderate, 1 for informational.\n\n"
+                        "Now, proceed with the web search and then generate the final JSON object.",
+                additional_kwargs={"cache-control": {"type": "ephemeral"}}
+            ),
             HumanMessage(
                 content="Please find the latest trade news and format it as a JSON object.")
         ])
@@ -209,7 +213,7 @@ class NewsService:
             logger.info(
                 f"Found {len(citation_urls)} unique citation URLs in total.")
 
-            final_news_list: List[NewsCreate] = []
+            final_news_list: List[TradeNewsCreate] = []
             url_validator = TypeAdapter(HttpUrl)
 
             num_items_to_process = min(
@@ -222,23 +226,34 @@ class NewsService:
                 )
 
             logger.info(f"Processing {num_items_to_process} news items.")
+            fetched_time = datetime.now(timezone.utc)
+
             for i in range(num_items_to_process):
                 item_data = news_items_from_llm[i]
                 source_url = citation_urls[i]
                 logger.debug(
                     f"Processing item {i}: data={item_data}, url='{source_url}'")
                 try:
-                    url_validator.validate_python(source_url)
-                    final_news_list.append(NewsCreate(
+                    # published_at에 timezone 정보가 없을 수 있으므로, UTC로 설정
+                    published_at_str = item_data.get("published_at")
+                    published_at_dt = datetime.fromisoformat(published_at_str)
+                    if published_at_dt.tzinfo is None:
+                        published_at_dt = published_at_dt.replace(
+                            tzinfo=timezone.utc)
+
+                    final_news_list.append(TradeNewsCreate(
                         title=item_data.get("title"),
                         summary=item_data.get("summary"),
                         source_name=item_data.get("source_name"),
-                        published_at=item_data.get("published_at"),
-                        source_url=source_url
+                        published_at=published_at_dt,
+                        source_url=url_validator.validate_python(source_url),
+                        category=item_data.get("category", "General"),
+                        priority=item_data.get("priority", 1),
+                        fetched_at=fetched_time,
                     ))
                 except Exception as e:
                     logger.warning(
-                        "Skipping item %d due to invalid data or URL '%s'. Error: %s", i, source_url, e)
+                        "Skipping item %d due to invalid data. Error: %s", i, e)
                     continue
 
             if not final_news_list:
