@@ -23,8 +23,8 @@ async def generate_trade_news(
     Claude 4 Sonnet의 네이티브 웹 검색을 사용하여 최신 무역 뉴스를 생성하고 DB에 저장합니다.
     """
     try:
-        # NewsService를 통해 Claude 웹 검색 및 뉴스 생성 실행
-        generated_news_list = await news_service.create_news_via_claude()
+        # NewsService를 통해 Claude 웹 검색 및 뉴스 생성/필터링 실행
+        generated_news_list = await news_service.create_news_via_claude(db=db)
 
         if not generated_news_list:
             return {
@@ -33,8 +33,8 @@ async def generate_trade_news(
                 "generated_count": 0,
             }
 
-        # 생성된 뉴스를 DB에 저장
-        await crud.create_news_articles(db, news_items=generated_news_list)
+        # 생성된 뉴스를 DB에 저장 (리팩토링된 crud 함수 사용)
+        await crud.trade_news.create_multi(db, news_items=generated_news_list)
         await db.commit()  # 변경사항을 데이터베이스에 최종 커밋
 
         return {

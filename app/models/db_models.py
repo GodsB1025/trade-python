@@ -54,7 +54,7 @@ class User(Base):
                    index=True)  # DDL의 idx_users_email 에 해당
     # name, created_at 등 Spring Boot에서 관리하는 다른 필드는 여기에서 제외할 수 있음
     # 단, ORM 관계에 필요하다면 최소한으로 유지
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     chat_sessions = relationship(
         "ChatSession", back_populates="user", cascade="all, delete-orphan")
@@ -72,11 +72,12 @@ class TradeNews(Base):
     title = Column(String(500), nullable=False)
     summary = Column(Text)
     source_name = Column(String(200), nullable=False)
-    published_at = Column(DateTime, nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=False)
     source_url = Column(String(1000), nullable=True)
     category = Column(String(50), index=True, nullable=True)
     priority = Column(Integer, nullable=False, default=1)
-    fetched_at = Column(DateTime, nullable=False, server_default=func.now())
+    fetched_at = Column(DateTime(timezone=True),
+                        nullable=False, server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint('title', 'published_at',
@@ -93,12 +94,13 @@ class ChatSession(Base):
 
     session_uuid = Column(UUID(as_uuid=True), primary_key=True,
                           server_default=func.gen_random_uuid())
-    created_at = Column(DateTime, primary_key=True, server_default=func.now())
+    created_at = Column(DateTime(timezone=True),
+                        primary_key=True, server_default=func.now())
     user_id = Column(BIGINT, ForeignKey(
         "users.id", ondelete="CASCADE"), nullable=False, index=True)
     session_title = Column(String(255))
     message_count = Column(Integer, nullable=False, default=0)
-    updated_at = Column(DateTime, server_default=func.now(),
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
                         onupdate=func.now())
 
     user = relationship("User", back_populates="chat_sessions")
@@ -119,9 +121,10 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     message_id = Column(BIGINT, primary_key=True, autoincrement=True)
-    created_at = Column(DateTime, primary_key=True, server_default=func.now())
+    created_at = Column(DateTime(timezone=True),
+                        primary_key=True, server_default=func.now())
     session_uuid = Column(UUID(as_uuid=True), nullable=False)
-    session_created_at = Column(DateTime, nullable=False)
+    session_created_at = Column(DateTime(timezone=True), nullable=False)
     message_type = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     ai_model = Column(String(100))
@@ -162,8 +165,8 @@ class Bookmark(Base):
             "sms_notification_enabled OR email_notification_enabled", persisted=True),
         nullable=False
     )
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(),
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
                         onupdate=func.now())
 
     user = relationship("User", back_populates="bookmarks")
@@ -208,8 +211,8 @@ class UpdateFeed(Base):
     is_read = Column(Boolean, nullable=False, default=False)
     included_in_daily_notification = Column(
         Boolean, nullable=False, default=False)
-    daily_notification_sent_at = Column(DateTime)
-    created_at = Column(DateTime, server_default=func.now())
+    daily_notification_sent_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="update_feeds")
     bookmark = relationship(
@@ -239,8 +242,8 @@ class HscodeVector(Base):
     hscode_differences = Column(Text)
     confidence_score = Column(Float, default=0.0)
     verified = Column(Boolean, default=False)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(),
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
                         onupdate=func.now())
 
     __table_args__ = (
@@ -268,7 +271,7 @@ class MonitorLog(Base):
     response_time_ms = Column(Integer, nullable=False, default=0)
     success = Column(Boolean, nullable=False, default=True)
     error_message = Column(Text)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User")
 

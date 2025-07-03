@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -11,16 +12,30 @@ from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field, HttpUrl, TypeAdapter
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chains.prompt_chains import create_trade_news_prompt
 from app.core.config import settings
 from app.core.llm_provider import llm_provider
+from app.db import crud
 from app.models.schemas import TradeNewsCreate
 from app.utils.llm_response_parser import (
     extract_citation_urls_from_ai_message, extract_json_from_ai_message
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_title(title: str) -> str:
+    """뉴스 제목을 비교 가능하도록 정규화. 소문자 변환, 공백/특수문자 제거."""
+    if not title:
+        return ""
+    # 소문자로 변환
+    title = title.lower()
+    # 모든 비-단어 문자(알파벳, 숫자 제외)를 공백으로 대체
+    title = re.sub(r'\W+', '', title)
+    # 앞뒤 공백 제거
+    return title.strip()
 
 
 class NewsService:
@@ -88,12 +103,28 @@ class NewsService:
 
         return final_news_list
 
-    async def create_news_via_claude(self) -> List[TradeNewsCreate]:
+    async def create_news_via_claude(self, db: AsyncSession) -> List[TradeNewsCreate]:
         """
-        Claude의 웹 검색 기능과 API의 citation 메타데이터를 결합하여
+        TODO: 기존 뉴스 데이터 중복 제거하는 로직, 지금은 중복 제거도 잘 안 되고 조금 비효율적인 것 같음.
+        TODO: 중복 제거 로직을 더 효율적으로 구현해야 함.
+        """
+
+        """
+        Claude의 웹 검색 기능과 DB 중복 제거 로직을 결합하여
         신뢰성 높은 최신 무역 뉴스를 생성.
         """
         try:
+            # 1. 기존 뉴스 데이터 조회 (중복 제거용)
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            recent_news = await crud.trade_news.get_recent_trade_news(db, since=seven_days_ago)
+            existing_urls = {str(news.source_url)
+                             for news in recent_news if news.source_url}
+            existing_titles = {_normalize_title(
+                news.title) for news in recent_news if news.title}
+            logger.info(
+                f"Loaded {len(existing_urls)} existing URLs and {len(existing_titles)} titles for deduplication.")
+
+            # 2. LLM을 통한 뉴스 생성
             now_utc = datetime.now(timezone.utc)
             three_days_ago_utc = now_utc - timedelta(days=3)
             date_format = "%Y-%m-%d"
@@ -130,8 +161,46 @@ class NewsService:
             citation_urls = extract_citation_urls_from_ai_message(
                 response_message)
 
+            # 3. 중복 뉴스 필터링
+            unique_news_items = []
+            unique_citation_urls = []
+
+            num_items_to_process = min(
+                len(news_items_from_llm), len(citation_urls))
+
+            for i in range(num_items_to_process):
+                item_data = news_items_from_llm[i]
+                source_url = citation_urls[i]
+                title = item_data.get("title", "")
+
+                # 1차: URL로 중복 검사
+                if source_url in existing_urls:
+                    logger.debug(
+                        f"Skipping news item with existing URL: {source_url}")
+                    continue
+
+                # 2차: 정규화된 제목으로 중복 검사
+                normalized_title = _normalize_title(title)
+                if normalized_title in existing_titles:
+                    logger.debug(
+                        f"Skipping news item with existing title: '{title}' (normalized: '{normalized_title}')")
+                    continue
+
+                unique_news_items.append(item_data)
+                unique_citation_urls.append(source_url)
+
+            original_count = len(news_items_from_llm)
+            filtered_count = len(unique_news_items)
+            logger.info(
+                f"Deduplication finished. Original items: {original_count}, Unique items: {filtered_count}.")
+
+            if not unique_news_items:
+                logger.info("No new unique news items found after filtering.")
+                return []
+
+            # 4. DTO 생성 및 반환
             final_news_list = self._create_news_dtos_from_response(
-                news_items_from_llm, citation_urls)
+                unique_news_items, unique_citation_urls)
 
             logger.info(
                 f"Successfully created {len(final_news_list)} news items.")
