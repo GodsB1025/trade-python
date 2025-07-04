@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import uuid
 from dataclasses import dataclass, field
 from .schemas import ChatMessage, SearchResult
+from pydantic import BaseModel, Field
+from typing import Optional
 
 
 @dataclass
@@ -118,3 +120,26 @@ class PromptChainContext:
 
 # 전역 세션 매니저 인스턴스
 session_manager = SessionManager()
+
+
+class ChatRequest(BaseModel):
+    """
+    /api/v1/chat 엔드포인트에 대한 요청 스키마.
+    구현계획.md vFinal 및 chat_endpoint_implementation_plan.md v1.0 기준.
+    """
+    user_id: Optional[int] = Field(
+        None, description="회원 ID. 없으면 비회원으로 간주함.")
+    session_uuid: Optional[str] = Field(
+        None, description="기존 채팅 세션의 UUID. 새 채팅 시작 시에는 null.")
+    message: str = Field(..., min_length=1, max_length=5000,
+                         description="사용자의 질문 메시지")
+
+
+class StreamingChatResponse(BaseModel):
+    """
+    채팅 응답 스트림의 각 조각(chunk)에 대한 스키마.
+    SSE(Server-Sent Events)의 `data` 필드에 JSON 형태로 전송됨.
+    """
+    type: str = Field(...,
+                      description="이벤트의 종류 (예: 'token', 'metadata', 'error')")
+    data: dict = Field(..., description="이벤트와 관련된 데이터 페이로드")

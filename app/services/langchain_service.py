@@ -1,17 +1,26 @@
 import logging
+import re  # re 모듈 임포트
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import (
     Runnable,
     RunnablePassthrough,
+    RunnableBranch,
+    RunnableConfig,
+    chain as as_runnable,
 )
+from langchain_core.output_parsers import StrOutputParser
 from langchain_core.output_parsers.openai_tools import PydanticToolsParser
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from pydantic import BaseModel, Field
+from langchain_core.documents import Document
 
 from app.core.llm_provider import llm_provider
 from app.models.monitoring_models import MonitoringUpdate, SearchResult
+from app.vector_stores.hscode_retriever import get_hscode_retriever
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,24 +41,129 @@ class LLMMonitoringOutput(BaseModel):
     )
 
 
-class LangChainService:
+class LLMService:
     """
     LangChain을 활용하여 복잡한 AI 기반 작업을 처리하는 서비스.
-
-    주로 웹 검색, 정보 요약, 특정 형식의 데이터 추출 등
-    LLM의 고급 기능이 필요한 로직을 담당함.
+    - HSCode 모니터링 체인
+    - 일반 채팅 및 RAG 체인
     """
 
     def __init__(self):
-        """
-        서비스 초기화.
-
-        웹 검색 기능이 강화된 LLM을 `llm_provider`로부터 가져와 초기화하고,
-        효율화된 단일 호출 모니터링 체인을 생성함.
-        """
-        # self.llm_with_search는 _create_monitoring_chain 내부에서 직접 생성되므로 제거.
         self.retry_config = llm_provider.retry_config
         self.monitoring_chain = self._create_monitoring_chain()
+        self.chat_chain = self._create_chat_chain()
+
+    # --- 채팅 체인 생성 로직 ---
+
+    def _create_chat_chain(self) -> Runnable:
+        """
+        RAG, 웹 검색 폴백, 일반 대화를 처리하는 채팅 체인을 생성.
+        계획서에 따라 RAG 실패 시 웹 검색으로 폴백하는 분기 로직을 포함.
+        """
+        # 1. 조건 분기 함수들
+        def _is_hscode_question(input_dict: dict) -> bool:
+            hscode_pattern = r"\b(\d{4}\.\d{2}|\d{6}|\d{10})\b"
+            return re.search(hscode_pattern, input_dict.get("question", "")) is not None
+
+        def _has_documents(input_dict: dict) -> bool:
+            return bool(input_dict.get("docs"))
+
+        # 2. 체인 구성 요소들
+        retriever = get_hscode_retriever()
+        output_parser = StrOutputParser()
+        llm = llm_provider.news_chat_model
+        llm_with_web_search = llm_provider.news_llm_with_native_search
+
+        general_chat_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a helpful assistant. Answer the user's question."),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{question}"),
+        ])
+
+        rag_prompt = ChatPromptTemplate.from_messages([
+            ("system",
+             "You are a professional trade expert. Answer the user's question based strictly on the context provided below.\n\nContext:\n{context}"),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{question}"),
+        ])
+
+        web_search_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are a helpful assistant. The internal database does not have information for the user's question. Please answer the user's question by performing a web search."),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{question}"),
+        ])
+
+        # 3. 세부 체인 정의
+        @as_runnable
+        def format_docs(docs: List[Document]) -> str:
+            """검색된 문서 리스트를 단일 문자열로 포맷."""
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        # 3a. 일반 대화 체인
+        general_chain = (
+            RunnablePassthrough.assign(
+                # chat_history가 입력에 없는 경우를 대비해 빈 리스트를 기본값으로 할당
+                chat_history=lambda x: x.get("chat_history", [])
+            )
+            | RunnablePassthrough.assign(
+                answer=general_chat_prompt | llm | output_parser
+            )
+            | (lambda x: {"answer": x["answer"], "source": "llm", "docs": []})
+        )
+
+        # 3b. RAG 성공 시 체인
+        rag_chain_success = (
+            RunnablePassthrough.assign(
+                context=(lambda x: format_docs(x["docs"])),
+                chat_history=lambda x: x.get("chat_history", [])
+            )
+            | rag_prompt
+            | llm
+            | output_parser
+        )
+
+        # 3c. RAG 실패 시 웹 검색으로 폴백하는 체인
+        # 이 체인은 AIMessage 자체를 반환하여 후속 단계에서 tool_calls를 분석할 수 있도록 함
+        rag_chain_fallback_web_search = (
+            RunnablePassthrough.assign(
+                chat_history=lambda x: x.get("chat_history", [])
+            )
+            | web_search_prompt
+            | llm_with_web_search
+            # | output_parser -> 파서를 제거하고 AIMessage를 직접 반환
+        )
+
+        # 3d. RAG + 웹 검색 폴백을 포함하는 전체 RAG 체인
+        rag_branch = RunnableBranch(
+            # 조건: 문서가 있는가?
+            (_has_documents, rag_chain_success |
+             (lambda x: {"answer": x, "source_docs": []})),
+            # 없으면 웹 검색으로 폴백
+            rag_chain_fallback_web_search | (lambda x: {
+                "answer": x.content,
+                "source_docs": [Document(page_content=t["web_search_20250305"]["snippet"], metadata={"url": t["web_search_20250305"]["url"]}) for t in x.tool_calls if "web_search_20250305" in t]
+            }),
+        )
+
+        rag_with_fallback_chain = (
+            # 먼저 retriever를 호출하여 'docs' 키에 문서 저장
+            RunnablePassthrough.assign(
+                docs=(lambda x: x["question"]) | retriever,
+                chat_history=lambda x: x.get("chat_history", [])
+            )
+            | RunnablePassthrough.assign(result=rag_branch)
+            | (lambda x: {"answer": x["result"]["answer"], "source": "rag_or_web", "docs": x["result"]["source_docs"] or x["docs"]})
+        )
+
+        # 4. 최종 메인 체인: HSCode 질문 여부에 따라 분기
+        final_branch = RunnableBranch(
+            (_is_hscode_question, rag_with_fallback_chain),
+            general_chain,
+        )
+
+        return final_branch
+
+    # --- 모니터링 체인 생성 로직 (기존과 거의 동일) ---
 
     def _create_monitoring_chain(self) -> Runnable:
         """

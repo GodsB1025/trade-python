@@ -6,18 +6,27 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
 import logging
-from typing import Optional
+from typing import Optional, Type
 from redis.asyncio.client import Redis
 from redis.exceptions import AuthenticationError, RedisError
 
 from app.core.config import settings
 from app.services.chat_service import ChatService
 from app.services.news_service import NewsService
-from app.services.langchain_service import LangChainService
-from app.services.chat_history_service import ChatHistoryService
+from app.services.langchain_service import LLMService
 from app.db.session import get_db
+from app.services.chat_history_service import PostgresChatMessageHistory
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def get_llm_service() -> LLMService:
+    """
+    LLMService 의존성 주입.
+    애플리케이션 생명주기 동안 단일 인스턴스를 유지 (싱글톤).
+    """
+    return LLMService()
 
 
 @lru_cache(maxsize=1)
@@ -73,14 +82,15 @@ async def get_redis_client(
 
 
 def get_chat_service(
-    db: AsyncSession = Depends(get_db)
+    llm_service: LLMService = Depends(get_llm_service)
 ) -> ChatService:
     """
     ChatService 의존성 주입.
 
-    요청마다 DB 세션을 주입받아 새로운 ChatService 인스턴스를 생성.
+    요청마다 새로운 ChatService 인스턴스를 생성하되,
+    싱글톤인 LLMService를 주입받아 사용.
     """
-    return ChatService(db_session=db)
+    return ChatService(llm_service=llm_service)
 
 
 def get_news_service() -> NewsService:
@@ -93,16 +103,10 @@ def get_news_service() -> NewsService:
     return NewsService()
 
 
-def get_langchain_service() -> LangChainService:
+def get_chat_history_service() -> Type[PostgresChatMessageHistory]:
     """
-    LangChainService 의존성 주입.
+    PostgresChatMessageHistory 클래스 타입을 반환하는 의존성.
+
+    실제 인스턴스는 엔드포인트에서 session_uuid와 user_id를 사용하여 생성.
     """
-    return LangChainService()
-
-
-async def get_chat_history_service(
-    db: AsyncSession = Depends(get_db),
-    redis_client: Optional[Redis] = Depends(get_redis_client),
-) -> ChatHistoryService:
-    """ChatHistoryService 의존성 주입"""
-    return ChatHistoryService(db=db, redis_client=redis_client)
+    return PostgresChatMessageHistory

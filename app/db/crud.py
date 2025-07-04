@@ -172,57 +172,135 @@ async def create_update_feed(db: AsyncSession, feed_data: schemas.UpdateFeedCrea
     return db_feed
 
 
-async def get_or_create_chat_session(
-    db: AsyncSession, user_id: int, session_id: Optional[UUID] = None
-) -> db_models.ChatSession:
-    """
-    주어진 session_id로 가장 최신 채팅 세션을 찾거나, 없으면 새로 생성.
-    """
-    if session_id:
+class CRUDChat:
+    async def get_or_create_session(
+        self, db: AsyncSession, user_id: int, session_uuid_str: Optional[str] = None
+    ) -> db_models.ChatSession:
+        """
+        주어진 session_uuid로 채팅 세션을 찾거나, 없으면 새로 생성.
+        - session_uuid_str (str): Pydantic 모델에서 받은 문자열 UUID.
+        """
+        session_to_load = None
+        if session_uuid_str:
+            try:
+                session_uuid = UUID(session_uuid_str)
+                # messages 관계를 즉시 로딩(eager loading)하도록 수정
+                query = (
+                    select(db_models.ChatSession)
+                    .where(
+                        db_models.ChatSession.session_uuid == session_uuid,
+                        db_models.ChatSession.user_id == user_id,
+                    )
+                    .options(selectinload(db_models.ChatSession.messages))
+                )
+                result = await db.execute(query)
+                session_to_load = result.scalars().first()
+            except ValueError:
+                # 유효하지 않은 UUID 형식의 문자열일 경우, 무시하고 새 세션을 생성
+                pass
+
+        if session_to_load:
+            return session_to_load
+
+        # 세션이 없거나, UUID가 유효하지 않거나, 제공되지 않은 경우 새로 생성
+        new_session = db_models.ChatSession(user_id=user_id)
+        db.add(new_session)
+        await db.flush()
+        await db.refresh(new_session)
+        # `new_session.messages = []` 라인 제거:
+        # 새 객체의 관계(relationship)는 기본적으로 비어 있으며,
+        # 이 코드는 불필요한 동기적 Lazy-loading을 유발하여 MissingGreenlet 오류의 원인이 됨.
+        return new_session
+
+    async def get_messages_by_session(
+        self, db: AsyncSession, session_uuid: UUID
+    ) -> List[db_models.ChatMessage]:
+        """특정 세션의 모든 메시지를 생성 시간순으로 조회"""
         query = (
-            select(db_models.ChatSession)
-            .where(
-                db_models.ChatSession.session_uuid == session_id,
-                db_models.ChatSession.user_id == user_id,
-            )
-            .order_by(desc(db_models.ChatSession.created_at))
-            .options(selectinload(db_models.ChatSession.messages))
+            select(db_models.ChatMessage)
+            .where(db_models.ChatMessage.session_uuid == session_uuid)
+            .order_by(db_models.ChatMessage.created_at)
         )
         result = await db.execute(query)
-        session = result.scalars().first()
-        if session:
-            return session
+        return list(result.scalars().all())
 
-    # 세션이 없거나, session_id가 제공되지 않은 경우 새로 생성
-    new_session = db_models.ChatSession(user_id=user_id)
-    db.add(new_session)
-    await db.flush()
-    await db.refresh(new_session)
-    return new_session
+    async def create_message(
+        self, db: AsyncSession, message_in: schemas.ChatMessageCreate
+    ) -> db_models.ChatMessage:
+        """새로운 채팅 메시지를 생성"""
+        db_message = db_models.ChatMessage(**message_in.model_dump())
+        db.add(db_message)
+        await db.flush()
+        await db.refresh(db_message)
+        return db_message
 
+    async def delete_messages_by_session_uuid(
+        self, db: AsyncSession, session_uuid: UUID
+    ) -> None:
+        """특정 세션의 모든 메시지를 삭제"""
+        from sqlalchemy import delete
 
-async def get_chat_messages(
-    db: AsyncSession, session_uuid: UUID, session_created_at: str
-) -> List[db_models.ChatMessage]:
-    """특정 세션의 모든 메시지를 조회"""
-    query = (
-        select(db_models.ChatMessage)
-        .where(
-            db_models.ChatMessage.session_uuid == session_uuid,
-            db_models.ChatMessage.session_created_at == session_created_at,
+        stmt = delete(db_models.ChatMessage).where(
+            db_models.ChatMessage.session_uuid == session_uuid
         )
-        .order_by(db_models.ChatMessage.created_at)
-    )
-    result = await db.execute(query)
-    return result.scalars().all()
+        await db.execute(stmt)
 
 
-async def create_chat_message(
-    db: AsyncSession, message: schemas.ChatMessageCreate
-) -> db_models.ChatMessage:
-    """새로운 채팅 메시지를 생성"""
-    db_message = db_models.ChatMessage(**message.model_dump())
-    db.add(db_message)
-    await db.flush()
-    await db.refresh(db_message)
-    return db_message
+chat = CRUDChat()
+
+
+class CRUDHscode:
+    async def get_or_create(self, db: AsyncSession, code: str, description: str = "") -> db_models.Hscode:
+        """
+        주어진 코드로 Hscode를 찾거나, 없으면 새로 생성.
+        """
+        # 먼저 코드로 Hscode를 찾아봄
+        result = await db.execute(select(db_models.Hscode).filter(db_models.Hscode.code == code))
+        instance = result.scalars().first()
+
+        if instance:
+            return instance
+
+        # 없으면 새로 생성
+        new_instance = db_models.Hscode(code=code, description=description)
+        db.add(new_instance)
+        await db.flush()
+        await db.refresh(new_instance)
+        return new_instance
+
+
+hscode = CRUDHscode()
+
+
+class CRUDDocumentV2:
+    async def create_v2(
+        self, db: AsyncSession, *, hscode_id: int, content: str, metadata: dict
+    ) -> db_models.DocumentV2:
+        """
+        새로운 DocumentV2 객체를 생성.
+        """
+        # 내용 기반으로 고유 해시 생성
+        content_hash = sha256(content.encode('utf-8')).hexdigest()
+
+        # 동일한 해시를 가진 문서가 이미 있는지 확인
+        result = await db.execute(select(db_models.DocumentV2).filter(db_models.DocumentV2.content_hash == content_hash))
+        existing_doc = result.scalars().first()
+        if existing_doc:
+            # 이미 존재하면 생성하지 않고 기존 객체 반환 또는 예외 처리
+            # 여기서는 로깅 후 기존 객체 반환을 선택
+            # logger.info(f"Document with hash {content_hash} already exists.")
+            return existing_doc
+
+        db_doc = db_models.DocumentV2(
+            hscode_id=hscode_id,
+            content=content,
+            metadata=metadata,
+            content_hash=content_hash
+        )
+        db.add(db_doc)
+        await db.flush()
+        await db.refresh(db_doc)
+        return db_doc
+
+
+document = CRUDDocumentV2()

@@ -126,14 +126,14 @@ class LLMProvider:
         # self.monitoring_llm_with_native_search = monitoring_model_with_tools_bound
 
         # 6. Voyage AI 임베딩 모델 초기화
-        self.embeddings = VoyageAIEmbeddings(
+        self.embedding_model = VoyageAIEmbeddings(
             voyage_api_key=settings.VOYAGE_API_KEY,
-            model="voyage-large-2-instruct"
+            model="voyage-3-large"
         )
 
         # 7. PGVector 벡터 저장소 초기화
         self.vector_store = PGVector(
-            embeddings=self.embeddings,
+            embeddings=self.embedding_model,
             collection_name="hscode_vectors",
             connection=settings.SYNC_DATABASE_URL,
             use_jsonb=True,

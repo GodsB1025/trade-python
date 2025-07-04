@@ -15,11 +15,11 @@ from anthropic import RateLimitError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from aiolimiter import AsyncLimiter
 
-from app.api.v1.dependencies import get_redis_client, get_langchain_service
+from app.api.v1.dependencies import get_redis_client, get_llm_service
 from app.core.config import settings
 from app.db import crud
 from app.db.session import get_db, SessionLocal
-from app.services.langchain_service import LangChainService
+from app.services.langchain_service import LLMService
 from app.models.db_models import Bookmark, UpdateFeed
 from app.models.monitoring_models import MonitoringUpdate
 
@@ -133,14 +133,14 @@ async def _handle_update_found(
     reraise=True  # 재시도 실패 시 최종 예외를 다시 발생시킴
 )
 async def _fetch_update_with_retry(
-    langchain_service: LangChainService, hscode: str
+    llm_service: LLMService, hscode: str
 ) -> MonitoringUpdate:
     """
     tenacity를 사용하여 재시도 로직을, aiolimiter로 처리율 제한을 적용한 LangChain 서비스 호출 래퍼.
     """
     async with rate_limiter:
         logger.debug(f"HSCode {hscode}에 대한 업데이트 확인 시도...")
-        return await langchain_service.get_hscode_update_and_sources(hscode=hscode)
+        return await llm_service.get_hscode_update_and_sources(hscode=hscode)
 
 
 async def _process_bookmark(
@@ -148,7 +148,7 @@ async def _process_bookmark(
     redis_client: Redis,
     *,
     bookmark: Bookmark,
-    langchain_service: LangChainService,
+    llm_service: LLMService,
 ) -> bool:
     """
     단일 북마크에 대한 모니터링 프로세스를 실행.
@@ -160,7 +160,7 @@ async def _process_bookmark(
     async with semaphore:
         try:
             update_result = await _fetch_update_with_retry(
-                langchain_service=langchain_service, hscode=bookmark.target_value
+                llm_service=llm_service, hscode=bookmark.target_value
             )
             logger.debug(f"북마크 ID {bookmark.id} 처리 결과: {update_result.status}")
 
@@ -193,7 +193,7 @@ async def _process_bookmark(
 async def run_monitoring(
     db: AsyncSession = Depends(get_db),
     redis_client: Redis = Depends(get_redis_client),
-    langchain_service: LangChainService = Depends(get_langchain_service),
+    llm_service: LLMService = Depends(get_llm_service),
 ):
     """
     모니터링이 활성화된 모든 북마크의 최신 변경 사항을 주기적으로 감지하고, 유의미한 업데이트 발생 시 알림 생성 작업을 Redis에 큐잉하는 백그라운드 엔드포인트입니다.
@@ -318,7 +318,7 @@ async def run_monitoring(
                 semaphore,
                 redis_client,
                 bookmark=b,
-                langchain_service=langchain_service,
+                llm_service=llm_service,
             )
             for b in active_bookmarks
         ]

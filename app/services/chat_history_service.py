@@ -1,121 +1,102 @@
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import List
+from sqlalchemy.orm import Session
 from uuid import UUID
-from typing import Any, Optional
-import asyncio
 
-from app.db import crud
-from app.models import schemas, db_models
-from app.core.config import settings
-
-# TODO: 이 클래스는 app/db/crud.py에 구현될 함수에 의존하게 됩니다.
-# 현재는 뼈대만 구성합니다.
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import BaseMessage, message_to_dict, messages_from_dict
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
-def _db_message_to_base_message(db_message: db_models.ChatMessage) -> BaseMessage:
-    """DB 모델을 LangChain 메시지 모델로 변환"""
-    if db_message.message_type == "USER":
-        return HumanMessage(content=db_message.content)
-    elif db_message.message_type == "AI":
-        return AIMessage(content=db_message.content)
-    elif db_message.message_type == "SYSTEM":
-        return SystemMessage(content=db_message.content)
-    else:
-        raise ValueError(f"Unknown message type: {db_message.message_type}")
+from app.db.crud import chat as crud_chat
+from app.models import schemas
+from app.models.db_models import ChatMessage
 
 
-class DatabaseChatMessageHistory(BaseChatMessageHistory):
+async def _db_messages_to_langchain_messages(db_messages: List[ChatMessage]) -> List[BaseMessage]:
+    """SQLAlchemy 모델 리스트를 LangChain 메시지 객체 리스트로 변환"""
+    dict_messages = []
+    for msg in db_messages:
+        dict_messages.append(
+            {"type": msg.message_type.lower(), "data": {"content": msg.content}}
+        )
+    return messages_from_dict(dict_messages)
+
+
+class PostgresChatMessageHistory(BaseChatMessageHistory):
     """
-    데이터베이스와 상호작용하여 채팅 기록을 관리하는 클래스.
-    LangChain의 BaseChatMessageHistory를 상속받아, 프로젝트의 DB 스키마에 맞게 커스터마이징함.
+    PostgreSQL 데이터베이스를 백엔드로 사용하는 LangChain의 채팅 기록 클래스.
+    SQLAlchemy 비동기 세션을 사용하여 DB와 상호작용하도록 수정됨.
     """
 
-    def __init__(self, session_id: str, user_id: int, db: AsyncSession):
-        self.session_id = session_id
-        self.user_id = user_id
+    def __init__(self, db: AsyncSession, user_id: int, session: schemas.ChatSession):
+        """
+        초기화 시 DB 세션, 사용자 ID, 그리고 이미 생성/조회된 ChatSession 객체를 받음.
+        """
         self.db = db
-        self._session: Optional[db_models.ChatSession] = None
-        # 비동기 코드를 동기 메서드에서 실행하기 위한 이벤트 루프
-        self._loop = asyncio.get_event_loop()
-
-    async def _get_session(self) -> db_models.ChatSession:
-        if self._session is None:
-            try:
-                session_uuid = UUID(self.session_id)
-            except ValueError:
-                session_uuid = None
-
-            self._session = await crud.get_or_create_chat_session(
-                db=self.db, user_id=self.user_id, session_id=session_uuid
-            )
-        return self._session
+        self.user_id = user_id
+        # 외부에서 주입된, DB와 동기화된 세션 객체를 사용
+        self.session_uuid = session.session_uuid
+        self._session_created_at = session.created_at
 
     @property
-    def messages(self) -> list[BaseMessage]:
-        """세션에 해당하는 모든 메시지를 DB에서 동기적으로 조회"""
-        return self._loop.run_until_complete(self.aget_messages())
-
-    async def aget_messages(self) -> list[BaseMessage]:
-        """세션에 해당하는 모든 메시지를 DB에서 비동기적으로 조회"""
-        session = await self._get_session()
-        db_messages = await crud.get_chat_messages(
-            self.db, session.session_uuid, session.created_at
+    def messages(self) -> List[BaseMessage]:
+        """[사용주의] 동기적인 메시지 조회. LangChain의 async 흐름에서는 사용되지 않아야 함."""
+        raise NotImplementedError(
+            "동기 `messages` 속성은 지원되지 않습니다. "
+            "대신 `aget_messages`를 사용하십시오."
         )
-        return [_db_message_to_base_message(msg) for msg in db_messages]
 
-    def add_messages(self, messages: list[BaseMessage]) -> None:
-        """메시지 목록을 DB에 동기적으로 추가"""
-        self._loop.run_until_complete(self.aadd_messages(messages))
+    @messages.setter
+    def messages(self, messages: List[BaseMessage]) -> None:
+        """[사용주의] 동기적인 메시지 설정. LangChain의 async 흐름에서는 사용되지 않아야 함."""
+        raise NotImplementedError(
+            "동기 `messages` 속성 설정은 지원되지 않습니다. "
+            "대신 `aadd_messages`를 사용하십시오."
+        )
 
-    async def aadd_messages(self, messages: list[BaseMessage]) -> None:
-        """메시지 목록을 DB에 비동기적으로 추가"""
-        session = await self._get_session()
+    async def aget_messages(self) -> List[BaseMessage]:
+        """DB에서 비동기적으로 메시지를 조회."""
+        db_messages = await crud_chat.get_messages_by_session(
+            db=self.db, session_uuid=self.session_uuid
+        )
+        return await _db_messages_to_langchain_messages(db_messages)
+
+    async def aadd_message(self, message: BaseMessage) -> None:
+        """메시지 하나를 DB에 비동기적으로 추가"""
+        message_data = message_to_dict(message)
+        message_create = schemas.ChatMessageCreate(
+            session_uuid=self.session_uuid,
+            session_created_at=self._session_created_at,
+            message_type=message_data['type'].upper(),
+            content=message_data['data']['content'],
+        )
+        await crud_chat.create_message(db=self.db, message_in=message_create)
+
+    async def aadd_messages(self, messages: List[BaseMessage]) -> None:
+        """여러 메시지를 DB에 비동기적으로 추가"""
         for message in messages:
-            message_create = schemas.ChatMessageCreate(
-                session_uuid=session.session_uuid,
-                session_created_at=session.created_at,
-                message_type=message.type.upper(),
-                content=message.content,
-            )
-            await crud.create_chat_message(self.db, message_create)
+            await self.aadd_message(message)
 
-    async def clear(self) -> None:
-        """세션의 모든 메시지를 DB에서 비동기적으로 삭제"""
-        session = await self._get_session()
-        await crud.delete_chat_messages(self.db, session.session_uuid, session.created_at)
+    async def aclear(self) -> None:
+        """DB에서 해당 세션의 메시지를 비동기적으로 삭제."""
+        # LangChain의 RunnableWithMessageHistory는 clear를 직접 호출하지 않지만,
+        # 일관성을 위해 비동기 버전으로 구현
+        await crud_chat.delete_messages_by_session_uuid(
+            db=self.db, session_uuid=self.session_uuid
+        )
 
+    # ----------------------------------------------------------------
+    # 기존 동기 메서드들은 에러를 발생시키도록 남겨두거나, 삭제합니다.
+    # 여기서는 명시적으로 Not ImplementdError를 발생시켜 잘못된 사용을 방지합니다.
+    # ----------------------------------------------------------------
+    def add_message(self, message: BaseMessage) -> None:
+        raise NotImplementedError(
+            "동기 `add_message`는 지원되지 않습니다. "
+            "대신 `aadd_message`를 사용하십시오."
+        )
 
-class ChatHistoryService:
-    """
-    채팅 기록 관련 비즈니스 로직을 처리하는 서비스 클래스.
-    get_chat_history 메서드는 LangChain의 RunnableWithMessageHistory에 의해 호출될 팩토리 함수 역할을 함.
-    """
-
-    def __init__(self, db: AsyncSession):
-        self.db = db
-
-    def get_chat_history(
-        self, session_id: str, **kwargs: Any
-    ) -> DatabaseChatMessageHistory:
-        """
-        주어진 세션 ID에 대한 채팅 기록 객체를 반환. (동기 함수)
-        kwargs를 통해 LangChain의 RunnableConfig를 받아 user_id를 추출.
-        """
-        config = kwargs.get("config", {})
-        configurable = config.get("configurable", {})
-        request_user_id = configurable.get("user_id")
-
-        final_user_id: int
-        if request_user_id is None:
-            final_user_id = settings.GUEST_USER_ID
-        else:
-            try:
-                final_user_id = int(request_user_id)
-            except (ValueError, TypeError):
-                raise ValueError(
-                    f"Invalid user_id format: {request_user_id}. Must be an integer.")
-
-        return DatabaseChatMessageHistory(
-            session_id=session_id, user_id=final_user_id, db=self.db
+    def clear(self) -> None:
+        raise NotImplementedError(
+            "동기 `clear`는 지원되지 않습니다. "
+            "대신 `aclear`를 사용하십시오."
         )

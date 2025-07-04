@@ -1,30 +1,41 @@
-from fastapi import APIRouter, Depends
-from sse_starlette.sse import EventSourceResponse
+from fastapi import APIRouter, Depends, Request, BackgroundTasks
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import StreamingResponse
 
-from app.api.v1.dependencies import get_chat_service
-from app.models.schemas import ChatRequest
+from app.api.v1.dependencies import get_chat_service, get_db
+from app.models.chat_models import ChatRequest
 from app.services.chat_service import ChatService
 
 router = APIRouter()
 
 
-@router.post("", summary="실시간 스트리밍 채팅")
-async def stream_chat(
+@router.post("/", summary="AI Chat Endpoint with Streaming")
+async def handle_chat(
+    request: Request,
     chat_request: ChatRequest,
-    chat_service: ChatService = Depends(get_chat_service),
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    chat_service: ChatService = Depends(get_chat_service)
 ):
     """
-    ## 실시간 AI 채팅 (SSE 스트리밍)
+    사용자의 채팅 메시지를 받아 AI와 대화하고, 응답을 실시간으로 스트리밍합니다.
 
-    사용자의 질문에 대해 LangChain RAG 파이프라인을 통해 답변을 생성하고,
-    Server-Sent Events (SSE) 형식으로 실시간 스트리밍합니다.
-
-    - **question**: 사용자의 자연어 질문 (필수)
-    - **userId**: 회원 ID (선택 사항). 제공되지 않으면 비회원으로 간주하여 임시 세션으로 처리됩니다.
-    - **sessionId**: 세션 ID (선택 사항). 제공하여 이전 대화 내용을 이어갈 수 있습니다.
-
-    `sse-starlette`의 `EventSourceResponse`를 사용하여 안정적인 스트림을 제공합니다.
+    - **요청 본문:** `ChatRequest` 모델 참조
+        - `user_id`: 회원 식별자 (없으면 비회원)
+        - `session_uuid`: 기존 대화의 UUID
+        - `message`: 사용자 메시지
+    - **응답:**
+        - `StreamingResponse`: `text/event-stream` 형식의 SSE 스트림.
+        - 각 이벤트는 JSON 형식이며, `type`과 `data` 필드를 포함합니다.
+          - `type: 'session_id'`: 새 채팅 세션이 시작될 때 반환되는 세션 UUID
+          - `type: 'token'`: AI가 생성하는 응답 토큰
+          - `type: 'finish'`: 스트림 종료
+          - `type: 'error'`: 오류 발생
     """
-    event_generator = chat_service.stream_chat_response(chat_request)
+    generator = chat_service.stream_chat_response(
+        chat_request=chat_request,
+        db=db,
+        background_tasks=background_tasks
+    )
 
-    return EventSourceResponse(event_generator)
+    return StreamingResponse(generator, media_type="text/event-stream")

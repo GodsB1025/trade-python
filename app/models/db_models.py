@@ -233,7 +233,7 @@ class HscodeVector(Base):
     hscode = Column(String(20), nullable=False, unique=True)
     product_name = Column(String(500), nullable=False)
     description = Column(Text, nullable=False)
-    embedding = Column(Vector(1536), nullable=False)
+    embedding = Column(Vector(1024), nullable=False)
     metadata_ = Column("metadata", JSONB, nullable=False, server_default='{}')
     classification_basis = Column(Text)
     similar_hscodes = Column(JSONB)
@@ -289,7 +289,7 @@ class Langchain4jEmbedding(Base):
 
     embedding_id = Column(UUID(as_uuid=True), primary_key=True,
                           server_default=func.gen_random_uuid())
-    embedding = Column(Vector(1536), nullable=False)
+    embedding = Column(Vector(1024), nullable=False)
     # 'text' is a reserved keyword in some contexts
     text = Column('text', Text)
     metadata_ = Column("metadata", JSONB)
@@ -297,4 +297,46 @@ class Langchain4jEmbedding(Base):
     __table_args__ = (
         Index('idx_langchain4j_embedding_vector', 'embedding',
               postgresql_using='hnsw', postgresql_with={'m': 16, 'ef_construction': 64}),
+    )
+
+
+class Hscode(Base):
+    """HSCode 테이블 모델 - chat_service.py에서 사용"""
+    __tablename__ = 'hscode'
+
+    id = Column(BIGINT, primary_key=True, autoincrement=True)
+    code = Column(String(20), nullable=False, unique=True, index=True)
+    description = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())
+
+    # Document와의 관계
+    documents = relationship("DocumentV2", back_populates="hscode")
+
+    __table_args__ = (
+        Index('idx_hscode_code', 'code'),
+    )
+
+
+class DocumentV2(Base):
+    """문서 저장 테이블 모델 - RAG 문서 저장용"""
+    __tablename__ = 'documents'
+
+    id = Column(BIGINT, primary_key=True, autoincrement=True)
+    hscode_id = Column(BIGINT, ForeignKey(
+        'hscode.id', ondelete='CASCADE'), nullable=False)
+    content = Column(Text, nullable=False)
+    metadata_ = Column("metadata", JSONB, nullable=False, server_default='{}')
+    content_hash = Column(String(64), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
+                        onupdate=func.now())
+
+    # HSCode와의 관계
+    hscode = relationship("Hscode", back_populates="documents")
+
+    __table_args__ = (
+        Index('idx_documents_hscode_id', 'hscode_id'),
+        Index('idx_documents_content_hash', 'content_hash'),
     )
