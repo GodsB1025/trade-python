@@ -12,12 +12,33 @@ from app.models import schemas
 from app.models.db_models import ChatMessage
 
 
+def _langchain_type_to_db_type(langchain_type: str) -> str:
+    """LangChain 메시지 타입을 DB 메시지 타입으로 변환"""
+    mapping = {
+        'human': 'USER',
+        'ai': 'AI',
+        'system': 'AI',  # 시스템 메시지도 AI로 취급
+        'assistant': 'AI'  # assistant는 ai와 동일
+    }
+    return mapping.get(langchain_type.lower(), 'USER')
+
+
+def _db_type_to_langchain_type(db_type: str) -> str:
+    """DB 메시지 타입을 LangChain 메시지 타입으로 변환"""
+    mapping = {
+        'USER': 'human',
+        'AI': 'ai'
+    }
+    return mapping.get(db_type.upper(), 'human')
+
+
 async def _db_messages_to_langchain_messages(db_messages: List[ChatMessage]) -> List[BaseMessage]:
     """SQLAlchemy 모델 리스트를 LangChain 메시지 객체 리스트로 변환"""
     dict_messages = []
     for msg in db_messages:
         dict_messages.append(
-            {"type": msg.message_type.lower(), "data": {"content": msg.content}}
+            {"type": _db_type_to_langchain_type(msg.message_type), "data": {
+                "content": msg.content}}
         )
     return messages_from_dict(dict_messages)
 
@@ -67,7 +88,7 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
         message_create = schemas.ChatMessageCreate(
             session_uuid=self.session_uuid,
             session_created_at=self._session_created_at,
-            message_type=message_data['type'].upper(),
+            message_type=_langchain_type_to_db_type(message_data['type']),
             content=message_data['data']['content'],
         )
         await crud_chat.create_message(db=self.db, message_in=message_create)
