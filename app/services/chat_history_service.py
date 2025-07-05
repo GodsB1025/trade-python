@@ -20,13 +20,19 @@ def _langchain_type_to_db_type(langchain_type: str) -> str:
         "system": "AI",  # 시스템 메시지도 AI로 취급
         "assistant": "AI",  # assistant는 ai와 동일
     }
-    return mapping.get(langchain_type.lower(), "USER")
+    db_type = mapping.get(langchain_type.lower())
+    if db_type is None:
+        raise ValueError(f"지원되지 않는 LangChain 메시지 타입: {langchain_type}")
+    return db_type
 
 
 def _db_type_to_langchain_type(db_type: str) -> str:
     """DB 메시지 타입을 LangChain 메시지 타입으로 변환"""
     mapping = {"USER": "human", "AI": "ai"}
-    return mapping.get(db_type.upper(), "human")
+    langchain_type = mapping.get(db_type.upper())
+    if langchain_type is None:
+        raise ValueError(f"지원되지 않는 DB 메시지 타입: {db_type}")
+    return langchain_type
 
 
 async def _db_messages_to_langchain_messages(

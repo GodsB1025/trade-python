@@ -1,11 +1,28 @@
 """
 데이터베이스 테이블 스키마 (SQLAlchemy 모델)
 """
+
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint,
-    Enum as SQLAlchemyEnum, Computed, Index, ForeignKeyConstraint, Numeric, Float, text, and_, desc
+    Column,
+    Integer,
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Text,
+    UniqueConstraint,
+    Enum as SQLAlchemyEnum,
+    Computed,
+    Index,
+    ForeignKeyConstraint,
+    Numeric,
+    Float,
+    text,
+    and_,
+    desc,
+    CheckConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, BIGINT, ARRAY
 from sqlalchemy.orm import relationship, declarative_base, Mapped, foreign
@@ -17,55 +34,63 @@ Base = declarative_base()
 
 # --- ENUM Type Definitions (from 구현계획.md) ---
 
+
 class BookmarkType(enum.Enum):
-    HS_CODE = 'HS_CODE'
-    CARGO = 'CARGO'
+    HS_CODE = "HS_CODE"
+    CARGO = "CARGO"
 
 
 class FeedType(enum.Enum):
-    HS_CODE_TARIFF_CHANGE = 'HS_CODE_TARIFF_CHANGE'
-    HS_CODE_REGULATION_UPDATE = 'HS_CODE_REGULATION_UPDATE'
-    CARGO_STATUS_UPDATE = 'CARGO_STATUS_UPDATE'
-    TRADE_NEWS = 'TRADE_NEWS'
-    POLICY_UPDATE = 'POLICY_UPDATE'
+    HS_CODE_TARIFF_CHANGE = "HS_CODE_TARIFF_CHANGE"
+    HS_CODE_REGULATION_UPDATE = "HS_CODE_REGULATION_UPDATE"
+    CARGO_STATUS_UPDATE = "CARGO_STATUS_UPDATE"
+    TRADE_NEWS = "TRADE_NEWS"
+    POLICY_UPDATE = "POLICY_UPDATE"
 
 
 class TargetType(enum.Enum):
-    HS_CODE = 'HS_CODE'
-    CARGO = 'CARGO'
+    HS_CODE = "HS_CODE"
+    CARGO = "CARGO"
 
 
 class ImportanceLevel(enum.Enum):
-    HIGH = 'HIGH'
-    MEDIUM = 'MEDIUM'
-    LOW = 'LOW'
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
 
 
 # --- Model Definitions ---
 
+
 class User(Base):
     """사용자 테이블 모델"""
+
     __tablename__ = "users"
 
     # 계획서의 다른 테이블 FK가 BIGINT를 참조하므로 일관성을 위해 BIGINT로 변경
     # PK는 자동으로 인덱스가 생성되므로 index=True는 불필요
     id = Column(BIGINT, primary_key=True)
-    email = Column(String(255), nullable=False, unique=True,
-                   index=True)  # DDL의 idx_users_email 에 해당
+    email = Column(
+        String(255), nullable=False, unique=True, index=True
+    )  # DDL의 idx_users_email 에 해당
     # name, created_at 등 Spring Boot에서 관리하는 다른 필드는 여기에서 제외할 수 있음
     # 단, ORM 관계에 필요하다면 최소한으로 유지
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     chat_sessions = relationship(
-        "ChatSession", back_populates="user", cascade="all, delete-orphan")
+        "ChatSession", back_populates="user", cascade="all, delete-orphan"
+    )
     bookmarks = relationship(
-        "Bookmark", back_populates="user", cascade="all, delete-orphan")
+        "Bookmark", back_populates="user", cascade="all, delete-orphan"
+    )
     update_feeds = relationship(
-        "UpdateFeed", back_populates="user", cascade="all, delete-orphan")
+        "UpdateFeed", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class TradeNews(Base):
     """무역 뉴스 테이블 모델 (`스키마.md` 기준)"""
+
     __tablename__ = "trade_news"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
@@ -76,53 +101,62 @@ class TradeNews(Base):
     source_url = Column(String(1000), nullable=True)
     category = Column(String(50), index=True, nullable=True)
     priority = Column(Integer, nullable=False, default=1)
-    fetched_at = Column(DateTime(timezone=True),
-                        nullable=False, server_default=func.now())
+    fetched_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
     __table_args__ = (
-        UniqueConstraint('title', 'published_at',
-                         name='uq_trade_news_title_published_at'),
-        Index('idx_trade_news_priority', 'priority', desc('published_at')),
-        Index('idx_trade_news_published', desc('published_at')),
-        Index('idx_trade_news_category', 'category'),
+        UniqueConstraint(
+            "title", "published_at", name="uq_trade_news_title_published_at"
+        ),
+        Index("idx_trade_news_priority", "priority", desc("published_at")),
+        Index("idx_trade_news_published", desc("published_at")),
+        Index("idx_trade_news_category", "category"),
     )
 
 
 class ChatSession(Base):
     """채팅 세션 테이블 모델 - 구현계획.md v6.2 기준"""
+
     __tablename__ = "chat_sessions"
 
-    session_uuid = Column(UUID(as_uuid=True), primary_key=True,
-                          server_default=func.gen_random_uuid())
-    created_at = Column(DateTime(timezone=True),
-                        primary_key=True, server_default=func.now())
-    user_id = Column(BIGINT, ForeignKey(
-        "users.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_uuid = Column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    created_at = Column(
+        DateTime(timezone=True), primary_key=True, server_default=func.now()
+    )
+    user_id = Column(
+        BIGINT, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     session_title = Column(String(255))
     message_count = Column(Integer, nullable=False, default=0)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
-                        onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     user = relationship("User", back_populates="chat_sessions")
     messages = relationship(
         "ChatMessage",
         back_populates="session",
         cascade="all, delete-orphan",
-        primaryjoin="and_(ChatSession.session_uuid==foreign(ChatMessage.session_uuid), ChatSession.created_at==foreign(ChatMessage.session_created_at))"
+        primaryjoin="and_(ChatSession.session_uuid==foreign(ChatMessage.session_uuid), ChatSession.created_at==foreign(ChatMessage.session_created_at))",
     )
 
     __table_args__ = {
-        'postgresql_partition_by': 'RANGE (created_at)',
+        "postgresql_partition_by": "RANGE (created_at)",
     }
 
 
 class ChatMessage(Base):
     """채팅 메시지 테이블 모델 - 구현계획.md v6.2 기준"""
+
     __tablename__ = "chat_messages"
 
     message_id = Column(BIGINT, primary_key=True, autoincrement=True)
-    created_at = Column(DateTime(timezone=True),
-                        primary_key=True, server_default=func.now())
+    created_at = Column(
+        DateTime(timezone=True), primary_key=True, server_default=func.now()
+    )
     session_uuid = Column(UUID(as_uuid=True), nullable=False)
     session_created_at = Column(DateTime(timezone=True), nullable=False)
     message_type = Column(String(20), nullable=False)
@@ -136,23 +170,27 @@ class ChatMessage(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ['session_uuid', 'session_created_at'],
-            ['chat_sessions.session_uuid', 'chat_sessions.created_at'],
-            ondelete="CASCADE"
+            ["session_uuid", "session_created_at"],
+            ["chat_sessions.session_uuid", "chat_sessions.created_at"],
+            ondelete="CASCADE",
         ),
-        {'postgresql_partition_by': 'RANGE (created_at)'}
+        CheckConstraint(
+            "message_type IN ('USER', 'AI')", name="chat_messages_message_type_check"
+        ),
+        {"postgresql_partition_by": "RANGE (created_at)"},
     )
 
 
 class Bookmark(Base):
     """북마크 테이블 모델 - 구현계획.md v6.3 기준"""
+
     __tablename__ = "bookmarks"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
-    user_id = Column(BIGINT, ForeignKey(
-        "users.id", ondelete="CASCADE"), nullable=False, index=True)
-    type = Column(SQLAlchemyEnum(
-        BookmarkType, name="bookmark_type"), nullable=False)
+    user_id = Column(
+        BIGINT, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    type = Column(SQLAlchemyEnum(BookmarkType, name="bookmark_type"), nullable=False)
     target_value = Column(String(50), nullable=False)
     display_name = Column(String(200))
     sse_generated = Column(Boolean, nullable=False, default=False)
@@ -162,55 +200,62 @@ class Bookmark(Base):
     monitoring_active = Column(
         Boolean,
         Computed(
-            "sms_notification_enabled OR email_notification_enabled", persisted=True),
-        nullable=False
+            "sms_notification_enabled OR email_notification_enabled", persisted=True
+        ),
+        nullable=False,
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
-                        onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     user = relationship("User", back_populates="bookmarks")
     update_feeds = relationship(
         "UpdateFeed",
         primaryjoin="and_(Bookmark.user_id == foreign(UpdateFeed.user_id), "
-                    "Bookmark.type == foreign(UpdateFeed.target_type), "
-                    "Bookmark.target_value == foreign(UpdateFeed.target_value))",
+        "Bookmark.type == foreign(UpdateFeed.target_type), "
+        "Bookmark.target_value == foreign(UpdateFeed.target_value))",
         back_populates="bookmark",
         cascade="all, delete-orphan",
-        viewonly=True  # 이 관계는 조회용으로만 사용
+        viewonly=True,  # 이 관계는 조회용으로만 사용
     )
 
     __table_args__ = (
-        UniqueConstraint('user_id', 'target_value',
-                         name='_user_target_value_uc'),
-        Index('idx_bookmarks_monitoring_active', 'monitoring_active',
-              postgresql_where=text("monitoring_active IS TRUE")),
+        UniqueConstraint("user_id", "target_value", name="_user_target_value_uc"),
+        Index(
+            "idx_bookmarks_monitoring_active",
+            "monitoring_active",
+            postgresql_where=text("monitoring_active IS TRUE"),
+        ),
     )
 
 
 class UpdateFeed(Base):
     """업데이트 피드 테이블 모델 - 구현계획.md v6.3 기준"""
+
     __tablename__ = "update_feeds"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
-    user_id = Column(BIGINT, ForeignKey(
-        "users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(
+        BIGINT, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # Bookmark가 삭제되어도 피드는 남아야 할 수 있으므로 bookmark_id는 FK가 아닐 수 있음.
     # 하지만 계획서상으로는 사용자가 삭제되면 피드도 삭제되므로 user_id FK는 유지.
     # 북마크와의 직접적인 관계는 target_value로 찾는 것이 더 유연할 수 있음.
     # 여기서는 계획서에 명시된 user_id FK만 유지하고, bookmark_id는 삭제.
-    feed_type = Column(SQLAlchemyEnum(
-        FeedType, name="feed_type"), nullable=False)
+    feed_type = Column(SQLAlchemyEnum(FeedType, name="feed_type"), nullable=False)
     target_type = Column(SQLAlchemyEnum(TargetType, name="target_type"))
     target_value = Column(String(50))
     title = Column(String(500), nullable=False)
     content = Column(Text, nullable=False)
     source_url = Column(String(1000))
-    importance = Column(SQLAlchemyEnum(ImportanceLevel, name="importance_level"),
-                        nullable=False, default=ImportanceLevel.MEDIUM)
+    importance = Column(
+        SQLAlchemyEnum(ImportanceLevel, name="importance_level"),
+        nullable=False,
+        default=ImportanceLevel.MEDIUM,
+    )
     is_read = Column(Boolean, nullable=False, default=False)
-    included_in_daily_notification = Column(
-        Boolean, nullable=False, default=False)
+    included_in_daily_notification = Column(Boolean, nullable=False, default=False)
     daily_notification_sent_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -218,15 +263,16 @@ class UpdateFeed(Base):
     bookmark = relationship(
         "Bookmark",
         primaryjoin="and_(foreign(UpdateFeed.user_id) == Bookmark.user_id, "
-                    "foreign(UpdateFeed.target_type) == Bookmark.type, "
-                    "foreign(UpdateFeed.target_value) == Bookmark.target_value)",
+        "foreign(UpdateFeed.target_type) == Bookmark.type, "
+        "foreign(UpdateFeed.target_value) == Bookmark.target_value)",
         back_populates="update_feeds",
-        viewonly=True  # 이 관계는 조회용으로만 사용
+        viewonly=True,  # 이 관계는 조회용으로만 사용
     )
 
 
 class HscodeVector(Base):
     """HSCode 벡터 테이블 모델"""
+
     __tablename__ = "hscode_vectors"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
@@ -234,7 +280,7 @@ class HscodeVector(Base):
     product_name = Column(String(500), nullable=False)
     description = Column(Text, nullable=False)
     embedding = Column(Vector(1024), nullable=False)
-    metadata_ = Column("metadata", JSONB, nullable=False, server_default='{}')
+    metadata_ = Column("metadata", JSONB, nullable=False, server_default="{}")
     classification_basis = Column(Text)
     similar_hscodes = Column(JSONB)
     keywords = Column(ARRAY(Text))
@@ -243,26 +289,29 @@ class HscodeVector(Base):
     confidence_score = Column(Float, default=0.0)
     verified = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
-                        onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     __table_args__ = (
-        Index('idx_hscode_vectors_embedding', 'embedding', postgresql_using='hnsw',
-              postgresql_with={'m': 32, 'ef_construction': 128}),
-        Index('idx_hscode_vectors_metadata',
-              'metadata', postgresql_using='gin'),
-        Index('idx_hscode_vectors_keywords',
-              'keywords', postgresql_using='gin'),
+        Index(
+            "idx_hscode_vectors_embedding",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 32, "ef_construction": 128},
+        ),
+        Index("idx_hscode_vectors_metadata", "metadata", postgresql_using="gin"),
+        Index("idx_hscode_vectors_keywords", "keywords", postgresql_using="gin"),
     )
 
 
 class MonitorLog(Base):
     """AI 모델 사용 모니터링 로그 테이블 모델"""
-    __tablename__ = 'monitor_logs'
+
+    __tablename__ = "monitor_logs"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
-    user_id = Column(BIGINT, ForeignKey(
-        'users.id', ondelete="SET NULL"))
+    user_id = Column(BIGINT, ForeignKey("users.id", ondelete="SET NULL"))
     api_endpoint = Column(String(200), nullable=False)
     claude_model = Column(String(100), nullable=False)
     input_tokens = Column(Integer, nullable=False, default=0)
@@ -276,67 +325,74 @@ class MonitorLog(Base):
     user = relationship("User")
 
     __table_args__ = (
-        Index('idx_monitor_logs_user_cost', 'user_id',
-              'created_at', 'total_cost_usd'),
-        Index('idx_monitor_logs_daily_stats', text(
-            "date(created_at)"), 'claude_model'),
+        Index("idx_monitor_logs_user_cost", "user_id", "created_at", "total_cost_usd"),
+        Index("idx_monitor_logs_daily_stats", text("date(created_at)"), "claude_model"),
     )
 
 
 class Langchain4jEmbedding(Base):
     """Langchain4j 임베딩 테이블 모델 (스키마 호환성)"""
-    __tablename__ = 'langchain4j_embedding'
 
-    embedding_id = Column(UUID(as_uuid=True), primary_key=True,
-                          server_default=func.gen_random_uuid())
+    __tablename__ = "langchain4j_embedding"
+
+    embedding_id = Column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
     embedding = Column(Vector(1024), nullable=False)
     # 'text' is a reserved keyword in some contexts
-    text = Column('text', Text)
+    text = Column("text", Text)
     metadata_ = Column("metadata", JSONB)
 
     __table_args__ = (
-        Index('idx_langchain4j_embedding_vector', 'embedding',
-              postgresql_using='hnsw', postgresql_with={'m': 16, 'ef_construction': 64}),
+        Index(
+            "idx_langchain4j_embedding_vector",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+        ),
     )
 
 
 class Hscode(Base):
     """HSCode 테이블 모델 - chat_service.py에서 사용"""
-    __tablename__ = 'hscode'
+
+    __tablename__ = "hscode"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
     code = Column(String(20), nullable=False, unique=True, index=True)
     description = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
-                        onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     # Document와의 관계
     documents = relationship("DocumentV2", back_populates="hscode")
 
-    __table_args__ = (
-        Index('idx_hscode_code', 'code'),
-    )
+    __table_args__ = (Index("idx_hscode_code", "code"),)
 
 
 class DocumentV2(Base):
     """문서 저장 테이블 모델 - RAG 문서 저장용"""
-    __tablename__ = 'documents'
+
+    __tablename__ = "documents"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
-    hscode_id = Column(BIGINT, ForeignKey(
-        'hscode.id', ondelete='CASCADE'), nullable=False)
+    hscode_id = Column(
+        BIGINT, ForeignKey("hscode.id", ondelete="CASCADE"), nullable=False
+    )
     content = Column(Text, nullable=False)
-    metadata_ = Column("metadata", JSONB, nullable=False, server_default='{}')
+    metadata_ = Column("metadata", JSONB, nullable=False, server_default="{}")
     content_hash = Column(String(64), nullable=False, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
-                        onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     # HSCode와의 관계
     hscode = relationship("Hscode", back_populates="documents")
 
     __table_args__ = (
-        Index('idx_documents_hscode_id', 'hscode_id'),
-        Index('idx_documents_content_hash', 'content_hash'),
+        Index("idx_documents_hscode_id", "hscode_id"),
+        Index("idx_documents_content_hash", "content_hash"),
     )

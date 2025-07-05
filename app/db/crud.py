@@ -1,6 +1,7 @@
 """
 데이터베이스 CRUD(Create, Read, Update, Delete) 함수
 """
+
 from typing import List, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,15 +20,15 @@ from ..models import schemas
 
 class CRUDTradeNews:
     async def get(self, db: AsyncSession, id: int) -> db_models.TradeNews | None:
-        result = await db.execute(select(db_models.TradeNews).filter(db_models.TradeNews.id == id))
+        result = await db.execute(
+            select(db_models.TradeNews).filter(db_models.TradeNews.id == id)
+        )
         return result.scalars().first()
 
     async def get_multi(
         self, db: AsyncSession, *, skip: int = 0, limit: int = 100
     ) -> list[db_models.TradeNews]:
-        result = await db.execute(
-            select(db_models.TradeNews).offset(skip).limit(limit)
-        )
+        result = await db.execute(select(db_models.TradeNews).offset(skip).limit(limit))
         return list(result.scalars().all())
 
     async def get_recent_trade_news(
@@ -64,15 +65,16 @@ class CRUDTradeNews:
         for item in news_items:
             update_data = {}
             if item.published_at and item.published_at.tzinfo:
-                update_data["published_at"] = item.published_at.replace(
-                    tzinfo=None)
-            if hasattr(item, "fetched_at") and item.fetched_at and item.fetched_at.tzinfo:
-                update_data["fetched_at"] = item.fetched_at.replace(
-                    tzinfo=None)
+                update_data["published_at"] = item.published_at.replace(tzinfo=None)
+            if (
+                hasattr(item, "fetched_at")
+                and item.fetched_at
+                and item.fetched_at.tzinfo
+            ):
+                update_data["fetched_at"] = item.fetched_at.replace(tzinfo=None)
 
             if update_data:
-                processed_news_items.append(
-                    item.model_copy(update=update_data))
+                processed_news_items.append(item.model_copy(update=update_data))
             else:
                 processed_news_items.append(item)
 
@@ -129,7 +131,7 @@ class CRUDUpdateFeed:
             target_value=bookmark.target_value,
             title=f"'{bookmark.display_name}'에 대한 새로운 업데이트",
             content=summary,
-            importance=db_models.ImportanceLevel.MEDIUM
+            importance=db_models.ImportanceLevel.MEDIUM,
         )
         db.add(db_feed)
         await db.flush()
@@ -146,12 +148,15 @@ async def get_active_bookmarks(db: AsyncSession) -> List[db_models.Bookmark]:
     'monitoring_active' Computed 필드를 사용하도록 수정됨.
     """
     query = select(db_models.Bookmark).where(
-        db_models.Bookmark.monitoring_active == True)
+        db_models.Bookmark.monitoring_active == True
+    )
     result = await db.execute(query)
-    return result.scalars().all()
+    return list(result.scalars().all())
 
 
-async def create_update_feed(db: AsyncSession, feed_data: schemas.UpdateFeedCreate) -> db_models.UpdateFeed:
+async def create_update_feed(
+    db: AsyncSession, feed_data: schemas.UpdateFeedCreate
+) -> db_models.UpdateFeed:
     """
     새로운 업데이트 피드를 데이터베이스에 비동기적으로 생성.
     `구현계획.md` v6.3 및 SQLAlchemy 2.0 비동기 모범 사례에 맞게 수정됨.
@@ -164,7 +169,7 @@ async def create_update_feed(db: AsyncSession, feed_data: schemas.UpdateFeedCrea
         title=feed_data.title,
         content=feed_data.content,
         source_url=str(feed_data.source_url) if feed_data.source_url else None,
-        importance=feed_data.importance
+        importance=feed_data.importance,
     )
     db.add(db_feed)
     await db.flush()
@@ -250,12 +255,16 @@ chat = CRUDChat()
 
 
 class CRUDHscode:
-    async def get_or_create(self, db: AsyncSession, code: str, description: str = "") -> db_models.Hscode:
+    async def get_or_create(
+        self, db: AsyncSession, code: str, description: str = ""
+    ) -> db_models.Hscode:
         """
         주어진 코드로 Hscode를 찾거나, 없으면 새로 생성.
         """
         # 먼저 코드로 Hscode를 찾아봄
-        result = await db.execute(select(db_models.Hscode).filter(db_models.Hscode.code == code))
+        result = await db.execute(
+            select(db_models.Hscode).filter(db_models.Hscode.code == code)
+        )
         instance = result.scalars().first()
 
         if instance:
@@ -280,10 +289,14 @@ class CRUDDocumentV2:
         새로운 DocumentV2 객체를 생성.
         """
         # 내용 기반으로 고유 해시 생성
-        content_hash = sha256(content.encode('utf-8')).hexdigest()
+        content_hash = sha256(content.encode("utf-8")).hexdigest()
 
         # 동일한 해시를 가진 문서가 이미 있는지 확인
-        result = await db.execute(select(db_models.DocumentV2).filter(db_models.DocumentV2.content_hash == content_hash))
+        result = await db.execute(
+            select(db_models.DocumentV2).filter(
+                db_models.DocumentV2.content_hash == content_hash
+            )
+        )
         existing_doc = result.scalars().first()
         if existing_doc:
             # 이미 존재하면 생성하지 않고 기존 객체 반환 또는 예외 처리
@@ -295,7 +308,7 @@ class CRUDDocumentV2:
             hscode_id=hscode_id,
             content=content,
             metadata=metadata,
-            content_hash=content_hash
+            content_hash=content_hash,
         )
         db.add(db_doc)
         await db.flush()
