@@ -8,8 +8,10 @@ class Settings(BaseSettings):
     애플리케이션의 설정을 관리하는 클래스.
     .env 파일에서 환경 변수를 로드함.
     """
+
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding='utf-8', extra='ignore')
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # Project Settings
     PROJECT_NAME: str = "Trade Python AI Service"
@@ -24,14 +26,14 @@ class Settings(BaseSettings):
     SERVER_PORT: int = 8000
 
     # Database
-    DATABASE_URL: str = Field(..., env="DATABASE_URL")
+    DATABASE_URL: str = "postgresql://localhost:5432/tradedb"
 
     # Redis - 환경변수 기반 설정으로 변경
-    REDIS_HOST: str = Field(default="localhost", env="REDIS_HOST")
-    REDIS_PORT: int = Field(default=6379, env="REDIS_PORT")
-    REDIS_USERNAME: str | None = Field(default=None, env="REDIS_USERNAME")
-    REDIS_PASSWORD: str | None = Field(default=None, env="REDIS_PASSWORD")
-    REDIS_DB: int = Field(default=0, env="REDIS_DB")
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_USERNAME: str | None = None
+    REDIS_PASSWORD: str | None = None
+    REDIS_DB: int = 0
     REDIS_TIMEOUT: int = 2000  # milliseconds
 
     @property
@@ -53,13 +55,14 @@ class Settings(BaseSettings):
     MONITORING_JOB_LOCK_TIMEOUT: int = 3600  # 1 hour
     MONITORING_CONCURRENT_REQUESTS_LIMIT: int = 5
     MONITORING_RPM_LIMIT: int = Field(
-        60, description="모니터링 시 Claude API에 대한 분당 요청 수 제한")
+        default=60, description="모니터링 시 Claude API에 대한 분당 요청 수 제한"
+    )
     MONITORING_NOTIFICATION_QUEUE_KEY_PREFIX: str = "daily_notification:queue:"
     MONITORING_NOTIFICATION_DETAIL_KEY_PREFIX: str = "daily_notification:detail:"
 
     # AI Model API Keys & Settings
-    ANTHROPIC_API_KEY: str = Field(..., alias="CLAUDE_API_KEY")
-    VOYAGE_API_KEY: str = Field(..., env="VOYAGE_API_KEY")
+    ANTHROPIC_API_KEY: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    VOYAGE_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
     # Web Search Settings
@@ -72,10 +75,7 @@ class Settings(BaseSettings):
     LOG_ROTATION_BACKUP_COUNT: int = 7
 
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = [
-        "http://localhost:8081",
-        "http://127.0.0.1:8081"
-    ]
+    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:8081", "http://127.0.0.1:8081"]
 
     # 비동기 드라이버를 사용하도록 URL을 재구성
     @property
