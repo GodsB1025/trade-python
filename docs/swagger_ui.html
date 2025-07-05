@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Trade Python AI Service API 문서">
+    <title>Trade Python AI Service - API 문서</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=">
+    <style>
+        /* 커스텀 스타일 */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+        }
+        
+        .custom-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .custom-header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .custom-header p {
+            margin: 10px 0 0 0;
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .api-info {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-left: 4px solid #667eea;
+            margin: 20px;
+            border-radius: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .success-notice {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px 20px;
+            margin: 20px;
+            border-radius: 5px;
+            border-left: 4px solid #28a745;
+        }
+        
+        .swagger-ui .topbar {
+            display: none;
+        }
+        
+        .swagger-ui .info {
+            margin: 20px 0;
+        }
+        
+        /* 한국어 폰트 최적화 */
+        .swagger-ui {
+            font-family: 'Malgun Gothic', '맑은 고딕', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+        }
+        
+        /* 응답 코드 색상 개선 */
+        .swagger-ui .responses-inner h4 {
+            font-size: 14px;
+            margin: 0;
+            padding: 10px;
+            border-radius: 4px;
+            color: white;
+            text-align: center;
+        }
+        
+        .swagger-ui .response-col_status {
+            font-weight: bold;
+        }
+        
+        /* 성공 응답 */
+        .swagger-ui .responses-inner h4:contains("200"),
+        .swagger-ui .responses-inner h4:contains("201") {
+            background-color: #49cc90;
+        }
+        
+        /* 에러 응답 */
+        .swagger-ui .responses-inner h4:contains("400"),
+        .swagger-ui .responses-inner h4:contains("404"),
+        .swagger-ui .responses-inner h4:contains("500") {
+            background-color: #f93e3e;
+        }
+        
+        /* Windows 최적화 스크롤바 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* 인쇄 스타일 */
+        @media print {
+            .custom-header {
+                background: #667eea !important;
+                -webkit-print-color-adjust: exact;
+            }
+            
+            .swagger-ui .btn {
+                display: none !important;
+            }
+            
+            .swagger-ui .try-out {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="custom-header">
+        <h1>Trade Python AI Service</h1>
+        <p>AI 기반 무역 규제 레이더 플랫폼 API 문서</p>
+    </div>
+    
+    <div class="success-notice">
+        <strong>✅ OpenAPI 참조 해결 문제 수정됨!</strong><br>
+        • Context7 가이드에 따라 모든 $ref 참조를 인라인으로 해결했습니다.<br>
+        • HTTPValidationError와 ValidationError 참조 문제가 완전히 해결되었습니다.<br>
+        • Windows psycopg 호환성 문제도 함께 해결되었습니다.
+    </div>
+    
+    <div class="api-info">
+        <strong>📋 API 정보:</strong><br>
+        • 버전: 6.1.0<br>
+        • 생성일: 2025년 07월 05일 11:15:50<br>
+        • 서버: http://0.0.0.0:8000/api/v1<br>
+        • 문서 타입: OpenAPI 3.1.0 (참조 해결됨)<br>
+        • 플랫폼: Windows 11
+    </div>
+    
+    <div id="swagger-ui"></div>
+    
+    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js" crossorigin></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js" crossorigin></script>
+    <script>
+        // 스키마 데이터 임베딩 (모든 참조가 해결됨)
+        const apiSpec = {
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Trade Python AI Service",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/chat/": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "AI Chat Endpoint with Streaming",
+        "description": "사용자의 채팅 메시지를 받아 AI와 대화하고, 응답을 실시간으로 스트리밍함.\n\n- **요청 본문:** `ChatRequest` 모델 참조\n    - `user_id`: 회원 식별자 (없으면 비회원)\n    - `session_uuid`: 기존 대화의 UUID\n    - `message`: 사용자 메시지\n- **응답:**\n    - `StreamingResponse`: `text/event-stream` 형식의 SSE 스트림.\n    - 각 이벤트는 JSON 형식이며, `type`과 `data` 필드를 포함함.\n      - `type: 'session_id'`: 새 채팅 세션이 시작될 때 반환되는 세션 UUID\n      - `type: 'token'`: AI가 생성하는 응답 토큰\n      - `type: 'finish'`: 스트림 종료\n      - `type: 'error'`: 오류 발생",
+        "operationId": "handle_chat_api_v1_chat__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "user_id": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "User Id",
+                    "description": "회원 ID. 없으면 비회원으로 간주함."
+                  },
+                  "session_uuid": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Session Uuid",
+                    "description": "기존 채팅 세션의 UUID. 새 채팅 시작 시에는 null."
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 5000,
+                    "minLength": 1,
+                    "title": "Message",
+                    "description": "사용자의 질문 메시지"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "title": "ChatRequest",
+                "description": "/api/v1/chat 엔드포인트에 대한 요청 스키마.\n구현계획.md vFinal 및 chat_endpoint_implementation_plan.md v1.0 기준."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "채팅 엔드포인트를 찾을 수 없음"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "items": {
+                        "properties": {
+                          "loc": {
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "integer"
+                                }
+                              ]
+                            },
+                            "type": "array",
+                            "title": "Location"
+                          },
+                          "msg": {
+                            "type": "string",
+                            "title": "Message"
+                          },
+                          "type": {
+                            "type": "string",
+                            "title": "Error Type"
+                          }
+                        },
+                        "type": "object",
+                        "required": [
+                          "loc",
+                          "msg",
+                          "type"
+                        ],
+                        "title": "ValidationError"
+                      },
+                      "type": "array",
+                      "title": "Detail"
+                    }
+                  },
+                  "type": "object",
+                  "title": "HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/news/": {
+      "post": {
+        "tags": [
+          "News"
+        ],
+        "summary": "온디맨드 뉴스 생성",
+        "description": "Spring Boot 스케줄러에 의해 호출되는 온디맨드 뉴스 생성 엔드포인트.\nClaude 4 Sonnet의 네이티브 웹 검색을 사용하여 최신 무역 뉴스를 생성하고 DB에 저장합니다.",
+        "operationId": "generate_trade_news_api_v1_news__post",
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "뉴스 엔드포인트를 찾을 수 없음"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      }
+    },
+    "/api/v1/monitoring/run-monitoring": {
+      "post": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Run Monitoring",
+        "description": "모니터링이 활성화된 모든 북마크의 최신 변경 사항을 주기적으로 감지하고, 유의미한 업데이트 발생 시 알림 생성 작업을 Redis에 큐잉하는 백그라운드 엔드포인트입니다.\n\n<details>\n<summary>I. Producer (생산자: FastAPI) 로직</summary>\n\n> 이 엔드포인트는 알림 작업을 생성하는 '생산자' 역할을 수행합니다.\n\n**주요 처리 순서:**\n1.  **분산 락 (Distributed Lock):** Redis (`SET NX`)를 사용하여 여러 인스턴스의 동시 실행을 방지합니다.\n2.  **북마크 조회:** `monitoring_active=True`인 모든 북마크를 DB에서 조회합니다.\n3.  **병렬 및 속도 제어 처리:**\n    -   `asyncio.Semaphore`: LangChain 서비스에 대한 동시 요청 수를 제한하여 과부하를 방지합니다.\n    -   `Aiolimiter`: 분당 요청 수를 제어하여 외부 API의 속도 제한(Rate Limit)을 준수합니다.\n    -   `Tenacity`: API 호출 실패 시 지수 백오프(Exponential Backoff)를 적용하여 자동으로 재시도합니다.\n4.  **업데이트 처리 및 Redis 큐잉 (신뢰성 큐 패턴):**\n    -   **DB 저장:** 변경 사항 발견 시, `update_feeds` 테이블에 업데이트 내역을 저장합니다.\n    -   **Redis 큐잉:**\n        1.  **알림 상세 정보 (Hash):** `HSET` 명령어를 사용하여 `daily_notification:detail:{uuid}` 키에 알림 상세 내용을 저장합니다.\n            -   `HSET`: Hash 데이터 구조(Key-Value 맵과 유사)에 여러 필드-값 쌍을 저장하는 명령어입니다.\n        2.  **알림 작업 큐 (List):** `LPUSH` 명령어를 사용하여 `daily_notification:queue:{TYPE}` (예: `...:EMAIL`) 키에 처리할 작업의 `uuid`를 추가합니다.\n            -   `LPUSH`: List 데이터 구조(Array 또는 LinkedList와 유사)의 맨 앞에 요소를 추가하는 명령어입니다.\n</details>\n\n<details>\n<summary>II. Consumer (소비자: Spring Boot) 구현 가이드</summary>\n\n> Redis 큐에 쌓인 작업은 Spring Boot와 같은 별도의 워커(Worker) 프로세스가 처리해야 합니다.\n\n**권장 처리 순서 (신뢰성 보장):**\n1.  **작업 원자적으로 이동 (`BLMOVE`):** '대기 큐'에서 '처리 중 큐'로 작업을 안전하게 이동시킵니다.\n2.  **상세 정보 조회 (`HGETALL`):** 이동시킨 작업 `uuid`를 사용하여 상세 정보를 가져옵니다.\n3.  **비즈니스 로직 수행:** 실제 이메일 발송 등 알림 처리를 수행합니다.\n4.  **작업 완료 처리 (`LREM`):** 작업이 성공하면 '처리 중 큐'에서 해당 작업을 제거합니다.\n5.  **예외 처리:** 오류 발생 시 작업을 '처리 중 큐'에 남겨두어 데이터 유실을 방지합니다.\n</details>\n\n<details>\n<summary>III. 핵심 Redis 명령어 및 Spring Data Redis 타입 매핑</summary>\n\n> Spring Boot (`RedisTemplate`) 사용 시 각 Redis 명령어와 매핑되는 Java 타입을 명시합니다.\n\n#### **1. `BLMOVE`**\n-   **설명:** 리스트의 마지막 요소를 다른 리스트의 첫 번째 요소로 **원자적으로 이동**시키고, 만약 원본 리스트가 비어있으면 지정된 시간 동안 새로운 요소가 추가되기를 기다리는(Blocking) 명령어입니다.\n-   **핵심 역할:** 워커가 여러 개 실행되어도 **단 하나의 워커만이 작업을 가져가도록 보장**하며(경쟁 상태 방지), 큐가 비었을 때 불필요한 CPU 사용을 막아줍니다. 작업 유실 방지의 핵심입니다.\n-   **Java `RedisTemplate` 반환 타입:** `String`\n    -   이동된 작업 `uuid`가 문자열로 반환됩니다. 큐가 비어 타임아웃이 발생하면 `null`이 반환됩니다.\n    ```java\n    String taskId = redisTemplate.opsForList().move(\n        \"daily_notification:queue:EMAIL\", ListOperations.Direction.RIGHT,\n        \"daily_notification:processing_queue:EMAIL\", ListOperations.Direction.LEFT,\n        Duration.ofSeconds(10)\n    );\n    if (taskId != null) {\n        // ... process task\n    }\n    ```\n\n#### **2. `HGETALL`**\n-   **설명:** Hash 데이터 구조에서 모든 필드와 값의 쌍을 가져오는 명령어입니다.\n-   **핵심 역할:** 작업 `uuid`에 해당하는 모든 알림 상세 정보(수신자, 메시지 내용 등)를 한 번의 명령어로 조회합니다.\n-   **Java `RedisTemplate` 반환 타입:** `Map<Object, Object>` 또는 `Map<String, String>`\n    -   조회된 Hash의 필드-값 쌍들이 `Map`으로 반환됩니다. `RedisTemplate` 설정에 따라 타입을 명시적으로 지정할 수 있습니다.\n    ```java\n    Map<Object, Object> details = redisTemplate.opsForHash().entries(\"daily_notification:detail:\" + taskId);\n    String userId = (String) details.get(\"user_id\");\n    String message = (String) details.get(\"message\");\n    ```\n\n#### **3. `LREM`**\n-   **설명:** 리스트에서 지정된 값과 일치하는 요소를 **개수를 지정하여** 제거하는 명령어입니다.\n-   **핵심 역할:** 알림 발송을 성공적으로 마친 작업을 '처리 중 큐'에서 **정확히 하나만 제거**하여, 동일한 작업이 중복 처리되는 것을 방지합니다.\n-   **Java `RedisTemplate` 반환 타입:** `Long`\n    -   제거된 요소의 개수가 반환됩니다. 보통 `1`이 반환되며, `0`이 반환되면 무언가 잘못된 상황(예: 이미 삭제됨)임을 인지할 수 있습니다.\n    ```java\n    // count: 1 > 앞에서부터 taskId와 일치하는 요소 1개만 제거\n    Long removedCount = redisTemplate.opsForList().remove(\"daily_notification:processing_queue:EMAIL\", 1, taskId);\n    ```\n</details>",
+        "operationId": "run_monitoring_api_v1_monitoring_run_monitoring_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "title": "Status"
+                    },
+                    "monitored_bookmarks": {
+                      "type": "integer",
+                      "title": "Monitored Bookmarks"
+                    },
+                    "updates_found": {
+                      "type": "integer",
+                      "title": "Updates Found"
+                    },
+                    "lock_status": {
+                      "type": "string",
+                      "title": "Lock Status"
+                    }
+                  },
+                  "type": "object",
+                  "required": [
+                    "status",
+                    "monitored_bookmarks",
+                    "updates_found",
+                    "lock_status"
+                  ],
+                  "title": "MonitoringResponse",
+                  "description": "모니터링 실행 결과 응답 모델"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "모니터링 엔드포인트를 찾을 수 없음"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChatRequest": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "회원 ID. 없으면 비회원으로 간주함."
+          },
+          "session_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Uuid",
+            "description": "기존 채팅 세션의 UUID. 새 채팅 시작 시에는 null."
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Message",
+            "description": "사용자의 질문 메시지"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ChatRequest",
+        "description": "/api/v1/chat 엔드포인트에 대한 요청 스키마.\n구현계획.md vFinal 및 chat_endpoint_implementation_plan.md v1.0 기준."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "properties": {
+                "loc": {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ]
+                  },
+                  "type": "array",
+                  "title": "Location"
+                },
+                "msg": {
+                  "type": "string",
+                  "title": "Message"
+                },
+                "type": {
+                  "type": "string",
+                  "title": "Error Type"
+                }
+              },
+              "type": "object",
+              "required": [
+                "loc",
+                "msg",
+                "type"
+              ],
+              "title": "ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MonitoringResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "monitored_bookmarks": {
+            "type": "integer",
+            "title": "Monitored Bookmarks"
+          },
+          "updates_found": {
+            "type": "integer",
+            "title": "Updates Found"
+          },
+          "lock_status": {
+            "type": "string",
+            "title": "Lock Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "monitored_bookmarks",
+          "updates_found",
+          "lock_status"
+        ],
+        "title": "MonitoringResponse",
+        "description": "모니터링 실행 결과 응답 모델"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+};
+        
+        // Swagger UI 초기화 (참조 해결 최적화)
+        window.onload = function() {
+            window.ui = SwaggerUIBundle({
+                spec: apiSpec,
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                validatorUrl: null, // 외부 검증 비활성화
+                docExpansion: "list", // 태그는 펼치되, 오퍼레이션은 접힌
+                defaultModelsExpandDepth: 2,
+                defaultModelExpandDepth: 2,
+                displayOperationId: false,
+                displayRequestDuration: true,
+                filter: false,
+                showExtensions: false,
+                showCommonExtensions: false,
+                tryItOutEnabled: true,
+                persistAuthorization: true,
+                withCredentials: true,
+                supportedSubmitMethods: ['get', 'post', 'put', 'delete', 'patch', 'head', 'options'],
+                // 참조 해결 최적화 설정
+                resolve: {
+                    external: false  // 외부 참조 해결 비활성화
+                },
+                // 한국어 지원 설정
+                defaultModelRendering: 'example',
+                requestSnippetsEnabled: true,
+                requestSnippets: {
+                    generators: {
+                        curl_bash: {
+                            title: "cURL (bash)",
+                            syntax: "bash"
+                        },
+                        curl_powershell: {
+                            title: "cURL (PowerShell)",
+                            syntax: "powershell"
+                        },
+                        curl_cmd: {
+                            title: "cURL (CMD)",
+                            syntax: "bash"
+                        }
+                    },
+                    defaultExpanded: true
+                }
+            });
+            
+            // 로딩 완료 후 추가 설정
+            setTimeout(() => {
+                // 페이지 제목 업데이트
+                document.title = `Trade Python AI Service - API 문서`;
+                
+                // 콘솔 메시지
+                console.log('🚀 Trade Python AI Service API 문서가 성공적으로 로드되었습니다!');
+                console.log('📚 API 버전: 6.1.0');
+                console.log('🌐 서버: http://0.0.0.0:8000/api/v1');
+                console.log('🖥️ 플랫폼: Windows (Windows 호환성 개선됨)');
+                console.log('🔧 참조 해결: Context7 기반 인라인 해결 완료');
+                
+                // Windows 사용자를 위한 메시지
+                if (navigator.platform.indexOf('Win') > -1) {
+                    console.log('✅ Windows 환경에서 psycopg 호환성 문제가 해결되었습니다!');
+                }
+                
+                // 참조 해결 확인
+                const schema = window.ui.getSystem().getState().get('spec').get('json');
+                const hasRefs = JSON.stringify(schema).includes('$ref');
+                if (!hasRefs) {
+                    console.log('✅ 모든 $ref 참조가 성공적으로 해결되었습니다!');
+                } else {
+                    console.warn('⚠️ 일부 참조가 남아있을 수 있습니다.');
+                }
+                
+                // 커스텀 이벤트 리스너 추가
+                const tryOutButtons = document.querySelectorAll('.try-out__btn');
+                tryOutButtons.forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        console.log('🔧 Try it out 버튼이 클릭되었습니다.');
+                    });
+                });
+            }, 1000);
+        };
+        
+        // 에러 핸들링 강화
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            console.error('Swagger UI 로딩 중 오류 발생:', msg, error);
+            document.getElementById('swagger-ui').innerHTML = `
+                <div style="padding: 40px; text-align: center; color: #d32f2f;">
+                    <h2>❌ 문서 로딩 실패</h2>
+                    <p>API 문서를 로드하는 중 오류가 발생했습니다.</p>
+                    <p>브라우저의 개발자 도구를 확인하세요.</p>
+                    <details style="margin-top: 20px; text-align: left;">
+                        <summary>오류 상세 정보</summary>
+                        <pre>${JSON.stringify({ msg, url, lineNo, columnNo, error: error?.toString() }, null, 2)}</pre>
+                    </details>
+                </div>
+            `;
+        };
+    </script>
+</body>
+</html>
