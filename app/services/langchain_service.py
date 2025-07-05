@@ -14,7 +14,8 @@ from langchain_core.output_parsers.openai_tools import PydanticToolsParser
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 from langchain_core.documents import Document
-import anthropic
+from langchain_anthropic import ChatAnthropic
+from pydantic import SecretStr
 
 from app.core.llm_provider import llm_provider
 from app.models.monitoring_models import MonitoringUpdate, SearchResult
@@ -64,8 +65,13 @@ class LLMService:
         self.monitoring_chain = self._create_monitoring_chain()
         self.chat_chain = self._create_chat_chain()
         # Claude 3.5 Haiku 모델 초기화
-        self.question_classifier = anthropic.AsyncAnthropic(
-            api_key=settings.ANTHROPIC_API_KEY
+        self.question_classifier = ChatAnthropic(
+            model_name="claude-3-5-haiku-latest",
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=0.1,
+            max_tokens_to_sample=300,
+            timeout=None,
+            stop=None,
         )
 
     async def _classify_question_with_llm(
@@ -116,21 +122,19 @@ class LLMService:
     "reasoning": "분류 근거 설명"
 }}"""
 
-            # Claude 3.5 Haiku 모델 호출
-            message = await self.question_classifier.messages.create(
-                model="claude-3-5-haiku-latest",
-                max_tokens=300,
-                temperature=0.1,  # 일관성을 위해 낮은 온도
-                messages=[{"role": "user", "content": classification_prompt}],
+            # Claude 3.5 Haiku 모델 호출 - langchain 사용
+            from langchain_core.messages import HumanMessage
+
+            response = await self.question_classifier.ainvoke(
+                [HumanMessage(content=classification_prompt)]
             )
 
             # 응답 파싱
             response_text = ""
-            if message.content and len(message.content) > 0:
-                content_block = message.content[0]
-                response_text = getattr(
-                    content_block, "text", str(content_block)
-                ).strip()
+            if isinstance(response.content, str):
+                response_text = response.content.strip()
+            elif isinstance(response.content, list) and response.content:
+                response_text = str(response.content[0]).strip()
 
             # JSON 파싱 시도
             import json

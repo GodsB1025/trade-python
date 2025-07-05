@@ -1,6 +1,7 @@
 """
 뉴스 생성 API 엔드포인트
 """
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,12 +9,13 @@ from app.api.v1.dependencies import get_news_service
 from app.db import crud
 from app.db.session import get_db
 from app.services.news_service import NewsService
+
 # from app.services.db_service import DBService # TODO: DB 서비스 구현 후 주석 해제
 
 router = APIRouter()
 
 
-@router.post("/", status_code=201, summary="온디맨드 뉴스 생성")
+@router.post("", status_code=201, summary="온디맨드 뉴스 생성")
 async def generate_trade_news(
     db: AsyncSession = Depends(get_db),
     news_service: NewsService = Depends(get_news_service),
@@ -40,7 +42,7 @@ async def generate_trade_news(
         return {
             "status": "success",
             "message": f"{len(generated_news_list)} news items have been successfully generated and saved.",
-            "generated_count": len(generated_news_list)
+            "generated_count": len(generated_news_list),
         }
     except Exception as e:
         # TODO: 에러 로깅 추가 권장 (실제 프로덕션에서는 구조화된 로깅 필요)

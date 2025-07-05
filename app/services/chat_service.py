@@ -2,11 +2,15 @@ import logging
 import json
 import re
 from typing import AsyncGenerator, Dict, Any, List, cast
+import uuid
+from datetime import datetime
 
 from fastapi import BackgroundTasks
 from langchain_core.documents import Document
 from sqlalchemy.ext.asyncio import AsyncSession
-import anthropic
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage
+from pydantic import SecretStr
 
 from app.db import crud
 from app.db.session import SessionLocal, get_db
@@ -14,6 +18,7 @@ from app.models.chat_models import ChatRequest
 from app.services.chat_history_service import PostgresChatMessageHistory
 from app.services.langchain_service import LLMService
 from app.core.config import settings
+from app.core.llm_provider import llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +35,15 @@ async def generate_session_title(user_message: str, ai_response: str) -> str:
         생성된 세션 제목 (최대 50자)
     """
     try:
-        # Anthropic 클라이언트 생성 (LLM Provider 사용)
-        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        # llm_provider의 ChatAnthropic 사용
+        title_llm = ChatAnthropic(
+            model_name="claude-3-5-haiku-20241022",
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=0.3,
+            max_tokens_to_sample=100,
+            timeout=None,
+            stop=None,
+        )
 
         # 제목 생성 프롬프트
         prompt = f"""다음 대화를 기반으로 짧고 명확한 세션 제목을 생성해주세요.
@@ -54,23 +66,15 @@ AI 응답: {ai_response[:500]}...
 제목만 응답하세요:"""
 
         # API 호출
-        message = await client.messages.create(
-            model="claude-3-5-haiku-20241022",  # 빠르고 저렴한 모델 사용
-            max_tokens=100,
-            temperature=0.3,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response = await title_llm.ainvoke([HumanMessage(content=prompt)])
 
-        # 응답 텍스트 추출 및 정리
+        # 응답 텍스트 추출
         title = ""
-        try:
-            if message.content and len(message.content) > 0:
-                content_block = message.content[0]
-                # 안전하게 text 속성에 접근
-                title = getattr(content_block, "text", str(content_block)).strip()
-        except (AttributeError, IndexError, TypeError):
-            # 어떤 오류든 발생하면 폴백 처리
-            pass
+        if isinstance(response.content, str):
+            title = response.content.strip()
+        elif isinstance(response.content, list) and response.content:
+            # content가 list인 경우 첫 번째 요소 사용
+            title = str(response.content[0]).strip()
 
         if not title:
             # 응답이 비어있을 경우 폴백
@@ -156,7 +160,7 @@ class ChatService:
         background_tasks: BackgroundTasks,
     ) -> AsyncGenerator[str, None]:
         """
-        사용자 요청에 대한 AI 채팅 응답을 SSE 스트림으로 생성함.
+        사용자 요청에 대한 AI 채팅 응답을 Anthropic Claude API 형식의 SSE 스트림으로 생성함.
         사용자 로그인 상태에 따라 대화 기록 관리 여부를 결정함.
         강화된 트랜잭션 관리로 데이터 일관성 보장.
         """
@@ -169,6 +173,12 @@ class ChatService:
         current_session_uuid = None
         previous_messages = []  # 기본값으로 빈 리스트 설정
         is_new_session = False  # 새 세션 여부 추적
+
+        # 메시지 및 content block을 위한 UUID 생성
+        message_id = f"chatcompl_{uuid.uuid4().hex[:24]}"
+        parent_uuid = str(uuid.uuid4())
+        message_uuid = str(uuid.uuid4())
+        content_block_start_timestamp = datetime.utcnow().isoformat() + "Z"
 
         try:
             # 세션 및 히스토리 초기화
@@ -211,14 +221,6 @@ class ChatService:
                     # 새로 생성되었거나 기존의 세션 UUID를 가져옴
                     current_session_uuid = str(session_obj.session_uuid)
 
-                    # 첫 요청(기존 session_uuid가 없었음)이었다면, 클라이언트에게 알려줌
-                    if not session_uuid_str:
-                        sse_event = {
-                            "type": "session_id",
-                            "data": {"session_uuid": current_session_uuid},
-                        }
-                        yield f"data: {json.dumps(sse_event)}\n\n"
-
                     # 이전 대화 내역을 가져와서 체인의 입력에 포함
                     try:
                         previous_messages = await history.aget_messages()
@@ -244,11 +246,64 @@ class ChatService:
                             await user_message_savepoint.rollback()
                             # 메시지 저장 실패해도 응답은 계속 진행
 
+            # Anthropic 형식의 message_start 이벤트 전송
+            message_start_event = {
+                "type": "message_start",
+                "message": {
+                    "id": message_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "model": settings.ANTHROPIC_MODEL,  # 실제 사용 모델
+                    "parent_uuid": parent_uuid,
+                    "uuid": message_uuid,
+                    "content": [],
+                    "stop_reason": None,
+                    "stop_sequence": None,
+                },
+            }
+            yield f"event: message_start\ndata: {json.dumps(message_start_event)}\n\n"
+
+            # 세션 ID가 새로 생성된 경우, 별도의 metadata content block으로 전송
+            content_index = 0
+            if is_new_session and current_session_uuid:
+                metadata_block_event = {
+                    "type": "content_block_start",
+                    "index": content_index,
+                    "content_block": {
+                        "start_timestamp": datetime.utcnow().isoformat() + "Z",
+                        "stop_timestamp": None,
+                        "type": "metadata",
+                        "metadata": {"session_uuid": current_session_uuid},
+                    },
+                }
+                yield f"event: content_block_start\ndata: {json.dumps(metadata_block_event)}\n\n"
+
+                # 메타데이터 블록 종료
+                metadata_stop_event = {
+                    "type": "content_block_stop",
+                    "index": content_index,
+                    "stop_timestamp": datetime.utcnow().isoformat() + "Z",
+                }
+                yield f"event: content_block_stop\ndata: {json.dumps(metadata_stop_event)}\n\n"
+                content_index += 1
+
+            # 메인 텍스트 content block 시작
+            content_block_event = {
+                "type": "content_block_start",
+                "index": content_index,
+                "content_block": {
+                    "start_timestamp": content_block_start_timestamp,
+                    "stop_timestamp": None,
+                    "type": "text",
+                    "text": "",
+                    "citations": [],
+                },
+            }
+            yield f"event: content_block_start\ndata: {json.dumps(content_block_event)}\n\n"
+
             # 체인 실행 및 스트리밍
             final_output = None
             ai_response = ""
-            chunk_buffer = []
-            buffer_size = 10  # 버퍼 크기 설정
 
             # 1. 체인 스트리밍 실행
             input_data: Dict[str, Any] = {"question": chat_request.message}
@@ -262,43 +317,50 @@ class ChatService:
                 input_data["chat_history"] = []
 
             try:
+                # langchain의 astream 메서드를 올바르게 사용
                 async for chunk in chain.astream(input_data):
                     final_output = chunk
-                    answer_chunk = chunk.get("answer", "")
+                    # chunk가 dict이고 'answer' 키를 가진 경우
+                    if isinstance(chunk, dict) and "answer" in chunk:
+                        answer_chunk = chunk["answer"]
+                    # chunk가 문자열인 경우
+                    elif isinstance(chunk, str):
+                        answer_chunk = chunk
+                    else:
+                        continue
 
                     if answer_chunk:
                         ai_response += answer_chunk
-                        chunk_buffer.append(answer_chunk)
 
-                        # 버퍼가 일정 크기에 도달하면 전송
-                        if len(chunk_buffer) >= buffer_size or len(answer_chunk) > 50:
-                            buffered_content = "".join(chunk_buffer)
-                            sse_event = {
-                                "type": "token",
-                                "data": {"content": buffered_content},
-                            }
-                            yield f"data: {json.dumps(sse_event)}\n\n"
-                            chunk_buffer.clear()
-
-                # 남은 버퍼 내용 전송
-                if chunk_buffer:
-                    buffered_content = "".join(chunk_buffer)
-                    sse_event = {"type": "token", "data": {"content": buffered_content}}
-                    yield f"data: {json.dumps(sse_event)}\n\n"
+                        # content_block_delta 이벤트로 텍스트 전송
+                        delta_event = {
+                            "type": "content_block_delta",
+                            "index": content_index,
+                            "delta": {"type": "text_delta", "text": answer_chunk},
+                        }
+                        yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n"
 
             except Exception as stream_error:
                 logger.error(
                     f"체인 스트리밍 중 오류 발생: {stream_error}", exc_info=True
                 )
-                error_event = {
-                    "type": "error",
-                    "data": {
-                        "message": "AI 응답 생성 중 오류가 발생했습니다.",
-                        "error_code": "CHAIN_STREAMING_ERROR",
-                    },
+                # 에러 발생 시 에러 메시지를 delta로 전송
+                error_text = "AI 응답 생성 중 오류가 발생했습니다."
+                error_delta_event = {
+                    "type": "content_block_delta",
+                    "index": content_index,
+                    "delta": {"type": "text_delta", "text": error_text},
                 }
-                yield f"data: {json.dumps(error_event)}\n\n"
-                return
+                yield f"event: content_block_delta\ndata: {json.dumps(error_delta_event)}\n\n"
+                ai_response = error_text
+
+            # content block 종료
+            content_stop_event = {
+                "type": "content_block_stop",
+                "index": content_index,
+                "stop_timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+            yield f"event: content_block_stop\ndata: {json.dumps(content_stop_event)}\n\n"
 
             # 2. AI 응답 메시지 저장 (회원인 경우)
             if user_id and history and ai_response:
@@ -341,7 +403,10 @@ class ChatService:
                         # 제목 생성 실패해도 응답은 계속 진행
 
             # 4. RAG-웹 검색 폴백 시 백그라운드 작업 추가
-            if final_output and final_output.get("source") == "rag_or_web":
+            if (
+                isinstance(final_output, dict)
+                and final_output.get("source") == "rag_or_web"
+            ):
                 source_docs = final_output.get("docs", [])
                 if source_docs and not any(
                     doc.metadata.get("source") == "db" for doc in source_docs
@@ -366,20 +431,27 @@ class ChatService:
                 logger.error(f"최종 커밋 중 오류 발생: {commit_error}", exc_info=True)
                 await db.rollback()
 
-            # 완료 이벤트 전송
-            success_event = {
-                "type": "complete",
-                "data": {
-                    "message": "응답 생성이 완료되었습니다.",
-                    "token_count": len(ai_response),
-                    "source": (
-                        final_output.get("source", "unknown")
-                        if final_output
-                        else "unknown"
-                    ),
+            # message_delta 이벤트 (stop_reason 포함)
+            message_delta_event = {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            }
+            yield f"event: message_delta\ndata: {json.dumps(message_delta_event)}\n\n"
+
+            # message_limit 이벤트
+            message_limit_event = {
+                "type": "message_limit",
+                "message_limit": {
+                    "type": "within_limit",
+                    "resetsAt": None,
+                    "remaining": None,
+                    "perModelLimit": None,
                 },
             }
-            yield f"data: {json.dumps(success_event)}\n\n"
+            yield f"event: message_limit\ndata: {json.dumps(message_limit_event)}\n\n"
+
+            # message_stop 이벤트
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
 
         except Exception as e:
             logger.error(f"채팅 스트림 처리 중 치명적 오류 발생: {e}", exc_info=True)
@@ -390,11 +462,23 @@ class ChatService:
             except Exception as rollback_error:
                 logger.error(f"롤백 중 추가 오류 발생: {rollback_error}", exc_info=True)
 
-            error_event = {
-                "type": "error",
-                "data": {
-                    "message": "채팅 서비스에서 예기치 않은 오류가 발생했습니다.",
-                    "error_code": "CHAT_SERVICE_ERROR",
-                },
+            # 에러를 content_block_delta로 전송
+            error_text = "채팅 서비스에서 예기치 않은 오류가 발생했습니다."
+            error_delta = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": error_text},
             }
-            yield f"data: {json.dumps(error_event)}\n\n"
+            yield f"event: content_block_delta\ndata: {json.dumps(error_delta)}\n\n"
+
+            # content block 종료
+            error_stop = {
+                "type": "content_block_stop",
+                "index": 0,
+                "stop_timestamp": datetime.utcnow().isoformat() + "Z",
+            }
+            yield f"event: content_block_stop\ndata: {json.dumps(error_stop)}\n\n"
+
+            # message 종료
+            yield f'event: message_delta\ndata: {{"type":"message_delta","delta":{{"stop_reason":"error","stop_sequence":null}}}}\n\n'
+            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
