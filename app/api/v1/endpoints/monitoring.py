@@ -1,6 +1,7 @@
 """
 북마크 모니터링 API 엔드포인트
 """
+
 import logging
 import asyncio
 import uuid
@@ -12,7 +13,12 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from anthropic import RateLimitError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 from aiolimiter import AsyncLimiter
 
 from app.api.v1.dependencies import get_redis_client, get_llm_service
@@ -37,6 +43,7 @@ class MonitoringResponse(BaseModel):
     """
     모니터링 실행 결과 응답 모델
     """
+
     status: str
     monitored_bookmarks: int
     updates_found: int
@@ -59,27 +66,37 @@ async def _handle_update_found(
     # 다른 세션에서 온 bookmark 객체를 현재 세션에 병합
     merged_bookmark = await db.merge(bookmark)
 
+    # SQLAlchemy Column 객체를 직접 사용하는 대신 실제 값을 추출
+    bookmark_id = getattr(merged_bookmark, "id")
+    user_id = getattr(merged_bookmark, "user_id")
+    target_value = getattr(merged_bookmark, "target_value")
+    display_name = getattr(merged_bookmark, "display_name", "")
+
     if not update_result.summary:
         logger.warning(
-            f"북마크 ID {merged_bookmark.id}에 대한 업데이트 요약이 비어있어 처리를 건너뜁니다.")
+            f"북마크 ID {bookmark_id}에 대한 업데이트 요약이 비어있어 처리를 건너뜁니다."
+        )
         return False
 
     # Just-in-Time Check: 처리 직전 북마크의 최신 상태를 확인
-    await db.refresh(merged_bookmark, attribute_names=['monitoring_active'])
-    if not merged_bookmark.monitoring_active:
-        logger.info(f"북마크 ID {merged_bookmark.id}가 비활성화되어 알림 생성을 건너뜁니다.")
+    await db.refresh(merged_bookmark, attribute_names=["monitoring_active"])
+    # SQLAlchemy Column 객체를 직접 사용하는 대신 실제 값을 확인
+    monitoring_active = getattr(merged_bookmark, "monitoring_active", False)
+    if not monitoring_active:
+        logger.info(f"북마크 ID {bookmark_id}가 비활성화되어 알림 생성을 건너뜁니다.")
         return False
 
     existing_feed = await crud.update_feed.get_by_bookmark_and_content(
         db,
-        user_id=merged_bookmark.user_id,
-        target_value=merged_bookmark.target_value,
+        user_id=user_id,
+        target_value=target_value,
         content=update_result.summary,
     )
 
     if existing_feed:
         logger.info(
-            f"북마크 ID {merged_bookmark.id}에 대한 중복 업데이트 피드가 있어 처리를 건너뜁니다.")
+            f"북마크 ID {bookmark_id}에 대한 중복 업데이트 피드가 있어 처리를 건너뜁니다."
+        )
         return False
 
     # 1. UpdateFeed 생성
@@ -87,40 +104,47 @@ async def _handle_update_found(
         db, bookmark=merged_bookmark, summary=update_result.summary
     )
     logger.info(
-        f"북마크 '{merged_bookmark.display_name}'(ID: {merged_bookmark.id})에 대한 업데이트를 DB에 저장했습니다.")
+        f"북마크 '{display_name}'(ID: {bookmark_id})에 대한 업데이트를 DB에 저장했습니다."
+    )
 
     # 2. Redis에 알림 작업 큐잉
     # `Redis 데이터 구조.md` v6.2 스펙 기반
     try:
         # TODO: 사용자의 실제 알림 설정을 기반으로 여러 채널(EMAIL, SMS 등)에 대한 작업을 생성해야 함
-        if merged_bookmark.email_notification_enabled:
+        # SQLAlchemy Column 객체를 직접 사용하는 대신 실제 값을 확인
+        email_notification_enabled = getattr(
+            merged_bookmark, "email_notification_enabled", False
+        )
+
+        if email_notification_enabled:
             notification_uuid = str(uuid.uuid4())
             detail_key = f"daily_notification:detail:{notification_uuid}"
             queue_key = "daily_notification:queue:EMAIL"
 
             # 2-1. 알림 상세 정보 HSET으로 저장
-            await redis_client.hset(
+            _ = await redis_client.hset(  # type: ignore
                 detail_key,
                 mapping={
-                    "user_id": str(merged_bookmark.user_id),
-                    "message": f"'{merged_bookmark.display_name}'에 새로운 업데이트가 있습니다!",
+                    "user_id": str(user_id),
+                    "message": f"'{display_name}'에 새로운 업데이트가 있습니다!",
                     "type": "EMAIL",
                     "update_feed_id": str(new_feed.id),
                     "created_at": new_feed.created_at.isoformat(),
                 },
             )
             # 2-2. 처리 큐에 작업 ID를 LPUSH
-            await redis_client.lpush(queue_key, notification_uuid)
+            _ = await redis_client.lpush(queue_key, notification_uuid)  # type: ignore
 
             logger.info(
-                f"북마크 ID {merged_bookmark.id}에 대한 EMAIL 알림 작업을 Redis 큐({queue_key})에 추가했습니다.")
+                f"북마크 ID {bookmark_id}에 대한 EMAIL 알림 작업을 Redis 큐({queue_key})에 추가했습니다."
+            )
 
         # 다른 채널(예: SMS)에 대한 로직도 여기에 추가 가능
         return True
     except RedisError as e:
         logger.critical(
             f"UpdateFeed(id={new_feed.id}) 저장 후 Redis 큐잉 실패. 수동 조치 필요. 오류: {e}",
-            exc_info=True
+            exc_info=True,
         )
         # DB 트랜잭션은 성공했으므로 True가 아닌 False를 반환하여 실패를 알림
         return False
@@ -130,7 +154,7 @@ async def _handle_update_found(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_exception_type((asyncio.TimeoutError, RateLimitError)),
-    reraise=True  # 재시도 실패 시 최종 예외를 다시 발생시킴
+    reraise=True,  # 재시도 실패 시 최종 예외를 다시 발생시킴
 )
 async def _fetch_update_with_retry(
     llm_service: LLMService, hscode: str
@@ -159,31 +183,38 @@ async def _process_bookmark(
     """
     async with semaphore:
         try:
+            # SQLAlchemy Column 객체를 직접 사용하는 대신 실제 값을 추출
+            target_value = getattr(bookmark, "target_value")
+            bookmark_id = getattr(bookmark, "id")
+
             update_result = await _fetch_update_with_retry(
-                llm_service=llm_service, hscode=bookmark.target_value
+                llm_service=llm_service, hscode=target_value
             )
-            logger.debug(f"북마크 ID {bookmark.id} 처리 결과: {update_result.status}")
+            logger.debug(f"북마크 ID {bookmark_id} 처리 결과: {update_result.status}")
 
             if update_result.status == "UPDATE_FOUND":
                 # 데이터베이스 작업을 위해 새로운 세션 사용
                 async with SessionLocal() as db:
                     async with db.begin():  # 트랜잭션 관리
                         return await _handle_update_found(
-                            db, redis_client, bookmark=bookmark, update_result=update_result
+                            db,
+                            redis_client,
+                            bookmark=bookmark,
+                            update_result=update_result,
                         )
             elif update_result.status == "ERROR":
                 logger.error(
-                    f"북마크 ID {bookmark.id} 처리 중 LangChain 오류: {update_result.error_message}"
+                    f"북마크 ID {bookmark_id} 처리 중 LangChain 오류: {update_result.error_message}"
                 )
 
         except RateLimitError as e:
             # 재시도 실패 후에도 RateLimitError가 발생할 수 있음
             logger.warning(
-                f"API 속도 제한으로 북마크 ID {bookmark.id} 처리를 최종 실패했습니다. 오류: {e}"
+                f"API 속도 제한으로 북마크 ID {bookmark_id} 처리를 최종 실패했습니다. 오류: {e}"
             )
         except Exception as e:
             logger.error(
-                f"_process_bookmark 내 예외 발생 (북마크 ID: {bookmark.id}): {e}",
+                f"_process_bookmark 내 예외 발생 (북마크 ID: {bookmark_id}): {e}",
                 exc_info=True,
             )
     return False
@@ -276,15 +307,16 @@ async def run_monitoring(
     </details>
     """
     if not redis_client:
-        logger.critical("Redis 클라이언트를 사용할 수 없어 모니터링 작업을 시작할 수 없습니다.")
+        logger.critical(
+            "Redis 클라이언트를 사용할 수 없어 모니터링 작업을 시작할 수 없습니다."
+        )
         raise HTTPException(
             status_code=503,
             detail="Redis is not available, cannot start monitoring job.",
         )
 
     lock = redis_client.lock(
-        settings.MONITORING_JOB_LOCK_KEY,
-        timeout=settings.MONITORING_JOB_LOCK_TIMEOUT
+        settings.MONITORING_JOB_LOCK_KEY, timeout=settings.MONITORING_JOB_LOCK_TIMEOUT
     )
     if not await lock.acquire(blocking=False):
         logger.warning("이미 다른 모니터링 작업이 실행 중입니다.")
@@ -311,8 +343,7 @@ async def run_monitoring(
         monitored_count = len(active_bookmarks)
         logger.info(f"{monitored_count}개의 활성 북마크에 대한 모니터링을 시작합니다.")
 
-        semaphore = asyncio.Semaphore(
-            settings.MONITORING_CONCURRENT_REQUESTS_LIMIT)
+        semaphore = asyncio.Semaphore(settings.MONITORING_CONCURRENT_REQUESTS_LIMIT)
         tasks = [
             _process_bookmark(
                 semaphore,
@@ -328,9 +359,11 @@ async def run_monitoring(
         updates_found_count = 0
         for i, res in enumerate(results):
             if isinstance(res, Exception):
+                # SQLAlchemy Column 객체를 직접 사용하는 대신 실제 값을 추출
+                bookmark_id = getattr(active_bookmarks[i], "id")
                 logger.error(
-                    f"북마크 처리 중 예외 발생 (북마크 ID: {active_bookmarks[i].id}): {res}",
-                    exc_info=res
+                    f"북마크 처리 중 예외 발생 (북마크 ID: {bookmark_id}): {res}",
+                    exc_info=res,
                 )
             elif res is True:
                 updates_found_count += 1
@@ -346,9 +379,10 @@ async def run_monitoring(
         )
 
     except RedisError as e:
-        logger.critical(f"Redis 오류로 인해 모니터링 작업을 중단합니다: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=503, detail=f"Redis error occurred: {e}")
+        logger.critical(
+            f"Redis 오류로 인해 모니터링 작업을 중단합니다: {e}", exc_info=True
+        )
+        raise HTTPException(status_code=503, detail=f"Redis error occurred: {e}")
     finally:
         if await lock.locked():
             try:
