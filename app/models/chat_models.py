@@ -1,18 +1,19 @@
 """
 채팅 세션 및 상태 관리 모델
 """
+
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import uuid
 from dataclasses import dataclass, field
 from .schemas import ChatMessage, SearchResult
 from pydantic import BaseModel, Field
-from typing import Optional
 
 
 @dataclass
 class ConversationSession:
     """대화 세션 관리 클래스"""
+
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     messages: List[ChatMessage] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
@@ -75,7 +76,8 @@ class SessionManager:
     def cleanup_expired_sessions(self, timeout_minutes: int = 60) -> int:
         """만료된 세션 정리"""
         expired_sessions = [
-            session_id for session_id, session in self._sessions.items()
+            session_id
+            for session_id, session in self._sessions.items()
             if session.is_expired(timeout_minutes)
         ]
 
@@ -92,6 +94,7 @@ class SessionManager:
 @dataclass
 class PromptChainContext:
     """프롬프트 체이닝 컨텍스트"""
+
     original_query: str
     search_results: List[SearchResult] = field(default_factory=list)
     intermediate_responses: List[str] = field(default_factory=list)
@@ -127,12 +130,16 @@ class ChatRequest(BaseModel):
     /api/v1/chat 엔드포인트에 대한 요청 스키마.
     구현계획.md vFinal 및 chat_endpoint_implementation_plan.md v1.0 기준.
     """
+
     user_id: Optional[int] = Field(
-        None, description="회원 ID. 없으면 비회원으로 간주함.")
+        None, description="회원 ID. 없으면 비회원으로 간주함."
+    )
     session_uuid: Optional[str] = Field(
-        None, description="기존 채팅 세션의 UUID. 새 채팅 시작 시에는 null.")
-    message: str = Field(..., min_length=1, max_length=5000,
-                         description="사용자의 질문 메시지")
+        None, description="기존 채팅 세션의 UUID. 새 채팅 시작 시에는 null."
+    )
+    message: str = Field(
+        ..., min_length=1, max_length=5000, description="사용자의 질문 메시지"
+    )
 
 
 class StreamingChatResponse(BaseModel):
@@ -140,6 +147,8 @@ class StreamingChatResponse(BaseModel):
     채팅 응답 스트림의 각 조각(chunk)에 대한 스키마.
     SSE(Server-Sent Events)의 `data` 필드에 JSON 형태로 전송됨.
     """
-    type: str = Field(...,
-                      description="이벤트의 종류 (예: 'token', 'metadata', 'error')")
+
+    type: str = Field(
+        ..., description="이벤트의 종류 (예: 'token', 'metadata', 'error')"
+    )
     data: dict = Field(..., description="이벤트와 관련된 데이터 페이로드")

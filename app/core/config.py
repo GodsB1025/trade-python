@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyUrl, RedisDsn, Field, AnyHttpUrl, EmailStr
-from typing import List, Union
+from pydantic import Field
+from typing import List
 
 
 class Settings(BaseSettings):

@@ -1,14 +1,11 @@
 import logging
 import re
-import json
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_anthropic import ChatAnthropic
 from langchain_voyageai import VoyageAIEmbeddings
 from langchain_community.tools.tavily_search import TavilySearchResults
-from pgvector.sqlalchemy import Vector
 from fastapi import BackgroundTasks
 from pydantic import SecretStr
 

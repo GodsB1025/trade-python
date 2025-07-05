@@ -1,15 +1,11 @@
 import logging
 import json
 import re
-from typing import AsyncGenerator, Dict, Any, List, Tuple, cast
-from uuid import UUID
+from typing import AsyncGenerator, Dict, Any, List, cast
 
 from fastapi import BackgroundTasks
 from langchain_core.documents import Document
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core.runnables import ConfigurableFieldSpec
-from langchain_core.messages import BaseMessage
 import anthropic
 
 from app.db import crud
@@ -17,7 +13,6 @@ from app.db.session import SessionLocal, get_db
 from app.models.chat_models import ChatRequest
 from app.services.chat_history_service import PostgresChatMessageHistory
 from app.services.langchain_service import LLMService
-from app.core.llm_provider import llm_provider
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -169,7 +164,6 @@ class ChatService:
         session_uuid_str = chat_request.session_uuid
 
         chain = self.llm_service.chat_chain
-        config: Dict[str, Any] = {}
         history = None
         session_obj = None
         current_session_uuid = None

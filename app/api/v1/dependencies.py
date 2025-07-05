@@ -1,21 +1,22 @@
 """
 API 엔드포인트에서 사용할 의존성을 정의하는 모듈
 """
+
 from functools import lru_cache
 from fastapi import Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as redis
 import logging
-from typing import Optional, Type
+from typing import Type
 from redis.asyncio.client import Redis
 from redis.exceptions import AuthenticationError, RedisError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.services.chat_service import ChatService
 from app.services.news_service import NewsService
 from app.services.langchain_service import LLMService
-from app.db.session import get_db
 from app.services.chat_history_service import PostgresChatMessageHistory
+from app.db.session import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +44,11 @@ def get_redis_pool() -> redis.ConnectionPool:
             socket_timeout=5,
             socket_connect_timeout=5,
             retry_on_timeout=True,
-            health_check_interval=30
+            health_check_interval=30,
         )
         logger.info(
-            f"Redis 연결 풀 생성 완료: {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+            f"Redis 연결 풀 생성 완료: {settings.REDIS_HOST}:{settings.REDIS_PORT}"
+        )
         return pool
     except Exception as e:
         logger.critical(f"치명적 오류: Redis 연결 풀 생성 실패. 에러: {e}")
@@ -54,7 +56,7 @@ def get_redis_pool() -> redis.ConnectionPool:
 
 
 async def get_redis_client(
-    pool: redis.ConnectionPool = Depends(get_redis_pool)
+    pool: redis.ConnectionPool = Depends(get_redis_pool),
 ) -> Redis:
     """
     Redis 클라이언트 의존성 주입.
@@ -81,9 +83,7 @@ async def get_redis_client(
         )
 
 
-def get_chat_service(
-    llm_service: LLMService = Depends(get_llm_service)
-) -> ChatService:
+def get_chat_service(llm_service: LLMService = Depends(get_llm_service)) -> ChatService:
     """
     ChatService 의존성 주입.
 
@@ -110,3 +110,18 @@ def get_chat_history_service() -> Type[PostgresChatMessageHistory]:
     실제 인스턴스는 엔드포인트에서 session_uuid와 user_id를 사용하여 생성.
     """
     return PostgresChatMessageHistory
+
+
+# 타입 힌트를 위한 별칭
+# get_db는 app.db.session에서 import되며, 비동기 데이터베이스 세션을 제공
+# 사용 방법: db: AsyncSession = Depends(get_db)
+__all__ = [
+    "get_llm_service",
+    "get_redis_pool",
+    "get_redis_client",
+    "get_chat_service",
+    "get_news_service",
+    "get_chat_history_service",
+    "get_db",
+    "AsyncSession",
+]

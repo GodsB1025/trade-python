@@ -44,6 +44,10 @@ dev-dependencies = [
     "black>=24.0.0",
     "isort>=5.13.0",
     "pytest-mock>=3.14.1",
+    "pylint>=3.3.7",
+    "flake8>=7.3.0",
+    "mypy>=1.16.1",
+    "ruff>=0.12.2",
 ]
 
 [project.optional-dependencies]
@@ -69,3 +73,8 @@ asyncio_default_test_loop_scope = "function"
 
 [tool.uv.sources]
 "fastapi-realworld-example-app" = { url = "https://files.pythonhosted.org/packages/99/0f/c559888126d26a27ed315054f76632f01f01db0273845f782a20b8f4974f/fastapi_realworld_example_app-0.1.0-py3-none-any.whl" }
+
+[project.scripts]
+lint = "ruff check ."
+format = "ruff format ."
+type-check = "mypy ."

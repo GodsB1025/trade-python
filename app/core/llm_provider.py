@@ -4,7 +4,6 @@ from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_voyageai import VoyageAIEmbeddings
 from langchain_postgres import PGEngine, PGVectorStore
 from pydantic import SecretStr
-import asyncio
 from typing import Optional
 
 from app.core.config import settings

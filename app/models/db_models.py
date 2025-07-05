@@ -20,12 +20,11 @@ from sqlalchemy import (
     Numeric,
     Float,
     text,
-    and_,
     desc,
     CheckConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, BIGINT, ARRAY
-from sqlalchemy.orm import relationship, declarative_base, Mapped, foreign
+from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy import func
 from pgvector.sqlalchemy import Vector
 

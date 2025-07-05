@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from datetime import datetime
-from sqlalchemy import desc, and_, or_
+from sqlalchemy import and_
 from hashlib import sha256
 
 # SQLAlchemy 모델과 Pydantic 스키마를 임포트합니다.

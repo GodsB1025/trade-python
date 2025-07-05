@@ -5,8 +5,6 @@
 import logging
 import asyncio
 import uuid
-from typing import Tuple, List
-
 from fastapi import APIRouter, Depends, HTTPException
 from redis.asyncio.client import Redis
 from redis.exceptions import RedisError
@@ -26,7 +24,7 @@ from app.core.config import settings
 from app.db import crud
 from app.db.session import get_db, SessionLocal
 from app.services.langchain_service import LLMService
-from app.models.db_models import Bookmark, UpdateFeed
+from app.models.db_models import Bookmark
 from app.models.monitoring_models import MonitoringUpdate
 
 logger = logging.getLogger(__name__)
