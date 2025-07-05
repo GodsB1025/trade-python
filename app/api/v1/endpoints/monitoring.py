@@ -1,7 +1,7 @@
 """
 북마크 모니터링 API 엔드포인트
 """
-
+import json
 import logging
 import asyncio
 import uuid
@@ -195,7 +195,7 @@ async def _queue_notification_task(
     try:
         notification_uuid = str(uuid.uuid4())
         detail_key = f"daily_notification:detail:{notification_uuid}"
-        queue_key = f"daily_notification:queue:{notification_type}"
+        queue_key = f"daily_notification:queue:"
 
         # Redis 파이프라인을 사용한 원자적 작업 (Context7 베스트 프랙티스)
         async with redis_client.pipeline(transaction=True) as pipe:
@@ -203,16 +203,16 @@ async def _queue_notification_task(
             pipe.hset(  # type: ignore
                 detail_key,
                 mapping={
-                    "user_id": str(user_id),
-                    "message": message,
-                    "type": notification_type,
-                    "update_feed_id": str(update_feed_id),
-                    "created_at": created_at.isoformat(),
+                    "user_id": json.dumps(str(user_id)),
+                    "message": json.dumps(message),
+                    "type": json.dumps(notification_type),
+                    "update_feed_id": json.dumps(str(update_feed_id)),
+                    "created_at": json.dumps(created_at.isoformat()),
                 },
             )
 
             # 2. 처리 큐에 작업 ID를 LPUSH
-            pipe.lpush(queue_key, notification_uuid)  # type: ignore
+            pipe.lpush(queue_key, json.dumps(notification_uuid))  # type: ignore
 
             # 원자적 실행
             await pipe.execute()
