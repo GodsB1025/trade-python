@@ -107,46 +107,125 @@ async def _handle_update_found(
         f"북마크 '{display_name}'(ID: {bookmark_id})에 대한 업데이트를 DB에 저장했습니다."
     )
 
-    # 2. Redis에 알림 작업 큐잉
-    # `Redis 데이터 구조.md` v6.2 스펙 기반
+    # 2. Redis에 알림 작업 큐잉 (다중 채널 처리)
     try:
-        # TODO: 사용자의 실제 알림 설정을 기반으로 여러 채널(EMAIL, SMS 등)에 대한 작업을 생성해야 함
         # SQLAlchemy Column 객체를 직접 사용하는 대신 실제 값을 확인
-        email_notification_enabled = getattr(
+        effective_email_enabled = getattr(
             merged_bookmark, "email_notification_enabled", False
         )
+        effective_sms_enabled = getattr(
+            merged_bookmark, "sms_notification_enabled", False
+        )
 
-        if email_notification_enabled:
-            notification_uuid = str(uuid.uuid4())
-            detail_key = f"daily_notification:detail:{notification_uuid}"
-            queue_key = "daily_notification:queue:EMAIL"
+        notification_tasks_created = []
 
-            # 2-1. 알림 상세 정보 HSET으로 저장
-            _ = await redis_client.hset(  # type: ignore
+        # EMAIL 알림 처리
+        if effective_email_enabled:
+            email_success = await _queue_notification_task(
+                redis_client=redis_client,
+                user_id=user_id,
+                message=f"'{display_name}'에 새로운 업데이트가 있습니다!",
+                notification_type="EMAIL",
+                update_feed_id=getattr(new_feed, "id"),
+                created_at=getattr(new_feed, "created_at"),
+            )
+            if email_success:
+                notification_tasks_created.append("EMAIL")
+                logger.info(
+                    f"북마크 ID {bookmark_id}에 대한 EMAIL 알림 작업을 큐에 추가했습니다."
+                )
+
+        # SMS 알림 처리
+        if effective_sms_enabled:
+            sms_success = await _queue_notification_task(
+                redis_client=redis_client,
+                user_id=user_id,
+                message=f"'{display_name}'에 새로운 업데이트가 있습니다!",
+                notification_type="SMS",
+                update_feed_id=getattr(new_feed, "id"),
+                created_at=getattr(new_feed, "created_at"),
+            )
+            if sms_success:
+                notification_tasks_created.append("SMS")
+                logger.info(
+                    f"북마크 ID {bookmark_id}에 대한 SMS 알림 작업을 큐에 추가했습니다."
+                )
+
+        # 알림 작업 생성 결과 로깅
+        if notification_tasks_created:
+            logger.info(
+                f"북마크 ID {bookmark_id}에 대해 {len(notification_tasks_created)}개 채널({', '.join(notification_tasks_created)})의 알림 작업을 생성했습니다."
+            )
+            return True
+        else:
+            logger.info(
+                f"북마크 ID {bookmark_id}에 대해 활성화된 알림 채널이 없습니다."
+            )
+            return False
+
+    except Exception as e:
+        logger.critical(
+            f"UpdateFeed(id={getattr(new_feed, 'id', 'UNKNOWN')}) 저장 후 알림 설정 처리 중 오류 발생. 수동 조치 필요. 오류: {e}",
+            exc_info=True,
+        )
+        return False
+
+
+async def _queue_notification_task(
+    redis_client: Redis,
+    *,
+    user_id: int,
+    message: str,
+    notification_type: str,  # "EMAIL" or "SMS"
+    update_feed_id: int,
+    created_at,
+) -> bool:
+    """
+    Redis 큐에 알림 작업을 추가하는 헬퍼 함수
+
+    Args:
+        redis_client: Redis 클라이언트
+        user_id: 사용자 ID
+        message: 알림 메시지
+        notification_type: 알림 타입 ("EMAIL" 또는 "SMS")
+        update_feed_id: 업데이트 피드 ID
+        created_at: 생성 시간
+
+    Returns:
+        bool: 큐잉 성공 여부
+    """
+    try:
+        notification_uuid = str(uuid.uuid4())
+        detail_key = f"daily_notification:detail:{notification_uuid}"
+        queue_key = f"daily_notification:queue:{notification_type}"
+
+        # Redis 파이프라인을 사용한 원자적 작업 (Context7 베스트 프랙티스)
+        async with redis_client.pipeline(transaction=True) as pipe:
+            # 1. 알림 상세 정보 HSET으로 저장
+            pipe.hset(  # type: ignore
                 detail_key,
                 mapping={
                     "user_id": str(user_id),
-                    "message": f"'{display_name}'에 새로운 업데이트가 있습니다!",
-                    "type": "EMAIL",
-                    "update_feed_id": str(new_feed.id),
-                    "created_at": new_feed.created_at.isoformat(),
+                    "message": message,
+                    "type": notification_type,
+                    "update_feed_id": str(update_feed_id),
+                    "created_at": created_at.isoformat(),
                 },
             )
-            # 2-2. 처리 큐에 작업 ID를 LPUSH
-            _ = await redis_client.lpush(queue_key, notification_uuid)  # type: ignore
 
-            logger.info(
-                f"북마크 ID {bookmark_id}에 대한 EMAIL 알림 작업을 Redis 큐({queue_key})에 추가했습니다."
-            )
+            # 2. 처리 큐에 작업 ID를 LPUSH
+            pipe.lpush(queue_key, notification_uuid)  # type: ignore
 
-        # 다른 채널(예: SMS)에 대한 로직도 여기에 추가 가능
+            # 원자적 실행
+            await pipe.execute()
+
         return True
+
     except RedisError as e:
-        logger.critical(
-            f"UpdateFeed(id={new_feed.id}) 저장 후 Redis 큐잉 실패. 수동 조치 필요. 오류: {e}",
+        logger.error(
+            f"Redis 큐잉 실패 (사용자 ID: {user_id}, 타입: {notification_type}): {e}",
             exc_info=True,
         )
-        # DB 트랜잭션은 성공했으므로 True가 아닌 False를 반환하여 실패를 알림
         return False
 
 

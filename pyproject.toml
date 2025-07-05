@@ -33,6 +33,7 @@ dependencies = [
     "bs4>=0.0.2",
     "dateparser>=1.2.0",
     "aiolimiter>=1.1.0",
+    "rapidfuzz>=3.10.0",
 ]
 
 [tool.uv]
