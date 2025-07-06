@@ -129,12 +129,81 @@ class LLMProvider:
             ),
         }
 
-        # 6. 용도별 LLM 모델 최종 생성
+        # 6. HSCode 분류 전용 모델 및 웹 검색 도구 설정
+        # 신뢰할 수 있는 HSCode 분류 사이트만 검색하도록 화이트리스트 설정
+        self.hscode_web_search_tool = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "cache_control": {"type": "ephemeral"},
+            "max_uses": 8,
+            "allowed_domains": [
+                # 국제기구 공식 사이트 (최고 신뢰도)
+                "www.wcotradetools.org",
+                "www.wcoomd.org",
+                "hstracker.wto.org",
+                # 미국 정부 공식 사이트
+                "www.trade.gov",
+                "www.census.gov",
+                "hts.usitc.gov",
+                "rulings.cbp.gov",
+                # EU 및 영국 공식 사이트
+                "ec.europa.eu",
+                "www.gov.uk",
+                "www.revenue.ie",
+                "www.anpost.com",
+                "www.kvk.nl",
+                # 아시아태평양 정부 공식 사이트
+                "unipass.customs.go.kr",
+                "www.customs.go.jp",
+                "www.post.japanpost.jp",
+                "www.customs.gov.sg",
+                "www.abs.gov.au",
+                "www.abf.gov.au",
+                "ised-isde.canada.ca",
+                "www.canadapost-postescanada.ca",
+                "ezhs.customs.gov.my",
+                # 신뢰할 수 있는 상용 도구
+                "www.avalara.com",
+                "zonos.com",
+                "www.customsinfo.com",
+                "www.tariffnumber.com",
+                "www.dhl.com",
+                "www.fedex.com",
+            ],
+        }
+
+        # HSCode 분류 전용 ChatAnthropic 모델 초기화
+        self.hscode_base_llm = ChatAnthropic(
+            model_name="claude-sonnet-4-20250514",
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
+            max_tokens_to_sample=20_000,
+            timeout=None,
+            max_retries=3,
+            stop=None,
+            default_headers={
+                "anthropic-beta": "extended-cache-ttl-2025-04-11",
+                "anthropic-version": "2023-06-01",
+            },
+            thinking={"type": "enabled", "budget_tokens": 14_000},
+            rate_limiter=anthropic_rate_limiter,
+        )
+
+        # HSCode 분류용 모델에 웹 검색 도구 바인딩
+        self.hscode_llm_with_web_search = self.hscode_base_llm.bind_tools(
+            tools=[self.hscode_web_search_tool]
+        )
+
+        # 7. 용도별 LLM 모델 최종 생성
         # 모든 모델에 재시도 로직을 적용하여 안정성 강화
         self.news_chat_model = self.base_llm.with_retry(**self.retry_config)
         self.monitoring_chat_model = self.base_llm.with_retry(**self.retry_config)
+        self.hscode_chat_model = self.hscode_base_llm.with_retry(**self.retry_config)
 
         self.news_llm_with_native_search = self.news_llm_with_native_search.with_retry(
+            **self.retry_config
+        )
+        self.hscode_llm_with_web_search = self.hscode_llm_with_web_search.with_retry(
             **self.retry_config
         )
 

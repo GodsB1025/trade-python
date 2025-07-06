@@ -130,12 +130,12 @@ class LLMService:
                 [HumanMessage(content=classification_prompt)]
             )
 
-            # 응답 파싱
-            response_text = ""
-            if isinstance(response.content, str):
-                response_text = response.content.strip()
-            elif isinstance(response.content, list) and response.content:
-                response_text = str(response.content[0]).strip()
+            # 응답 파싱 (타입 안전)
+            from app.utils.llm_response_parser import (
+                extract_text_from_anthropic_response,
+            )
+
+            response_text = extract_text_from_anthropic_response(response).strip()
 
             # JSON 파싱 시도
             import json

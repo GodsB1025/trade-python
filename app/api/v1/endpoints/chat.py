@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("", summary="AI Chat Endpoint with HSCode Search and Streaming")
+@router.post(
+    "", summary="AI Chat Endpoint with HSCode Search and Streaming", response_model=None
+)
 async def handle_chat(
     request: Request,
     chat_request: ChatRequest,
@@ -56,12 +58,14 @@ async def handle_chat(
     logger.info(f"메시지 내용: {chat_request.message[:100]}...")  # 처음 100자만 로깅
     logger.info(f"====================")
 
-    # === 화물통관 조회 감지 및 처리 ===
-    cargo_response = await chat_service.check_cargo_tracking_intent(chat_request)
-    if cargo_response:
-        logger.info("화물통관 조회 요청으로 감지됨. JSON 응답을 반환합니다.")
+    # === 통합 의도 분류 및 특수 처리 ===
+    special_response = await chat_service.check_unified_intent(chat_request)
+    if special_response:
+        logger.info(
+            f"특수 의도 감지됨: {special_response.get('type', 'unknown')}. JSON 응답을 반환합니다."
+        )
         return JSONResponse(
-            content=cargo_response,
+            content=special_response,
             status_code=200,
             headers={
                 "Content-Type": "application/json; charset=utf-8",

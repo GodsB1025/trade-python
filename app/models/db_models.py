@@ -395,3 +395,109 @@ class DocumentV2(Base):
         Index("idx_documents_hscode_id", "hscode_id"),
         Index("idx_documents_content_hash", "content_hash"),
     )
+
+
+class DetailPageAnalysis(Base):
+    """상세페이지 분석 결과 테이블 모델"""
+
+    __tablename__ = "detail_page_analyses"
+
+    id = Column(BIGINT, primary_key=True, autoincrement=True)
+    user_id = Column(BIGINT, ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    session_uuid = Column(UUID(as_uuid=True), index=True)
+    session_created_at = Column(DateTime(timezone=True))
+    message_hash = Column(String(64), nullable=False, index=True)
+    original_message = Column(Text, nullable=False)
+    detected_intent = Column(String(50), nullable=False, index=True)
+    detected_hscode = Column(String(20), index=True)
+    confidence_score = Column(Float, nullable=False, default=0.0)
+    processing_time_ms = Column(Integer, nullable=False, default=0)
+    analysis_source = Column(String(50), nullable=False, index=True)
+    analysis_metadata = Column(JSONB, nullable=False, server_default="{}")
+    web_search_performed = Column(Boolean, nullable=False, default=False)
+    web_search_results = Column(JSONB)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # 관계 설정
+    user = relationship("User")
+    buttons = relationship(
+        "DetailPageButton", back_populates="analysis", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["session_uuid", "session_created_at"],
+            ["chat_sessions.session_uuid", "chat_sessions.created_at"],
+            ondelete="SET NULL",
+        ),
+        Index("idx_detail_page_analyses_user_session", "user_id", "session_uuid"),
+        Index("idx_detail_page_analyses_message_hash", "message_hash"),
+        Index(
+            "idx_detail_page_analyses_confidence",
+            "confidence_score",
+            postgresql_where=text("confidence_score >= 0.7"),
+        ),
+        Index(
+            "idx_detail_page_analyses_web_search",
+            "web_search_performed",
+            postgresql_where=text("web_search_performed = true"),
+        ),
+        Index(
+            "idx_detail_page_analyses_metadata",
+            "analysis_metadata",
+            postgresql_using="gin",
+        ),
+    )
+
+
+class DetailPageButton(Base):
+    """상세페이지 버튼 정보 테이블 모델"""
+
+    __tablename__ = "detail_page_buttons"
+
+    id = Column(BIGINT, primary_key=True, autoincrement=True)
+    analysis_id = Column(
+        BIGINT,
+        ForeignKey("detail_page_analyses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    button_type = Column(String(50), nullable=False, index=True)
+    label = Column(String(200), nullable=False)
+    url = Column(String(500), nullable=False)
+    query_params = Column(JSONB, nullable=False, server_default="{}")
+    priority = Column(Integer, nullable=False, default=1, index=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # 관계 설정
+    analysis = relationship("DetailPageAnalysis", back_populates="buttons")
+
+    __table_args__ = (
+        Index(
+            "idx_detail_page_buttons_active",
+            "is_active",
+            postgresql_where=text("is_active = true"),
+        ),
+    )
+
+
+class WebSearchCache(Base):
+    """웹 검색 결과 캐시 테이블 모델"""
+
+    __tablename__ = "web_search_cache"
+
+    id = Column(BIGINT, primary_key=True, autoincrement=True)
+    search_query_hash = Column(String(64), nullable=False, unique=True, index=True)
+    search_query = Column(Text, nullable=False)
+    search_type = Column(String(50), nullable=False, index=True)
+    search_results = Column(JSONB, nullable=False)
+    result_count = Column(Integer, nullable=False, default=0)
+    search_provider = Column(String(50), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_web_search_cache_created", desc("created_at")),)

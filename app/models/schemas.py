@@ -405,3 +405,47 @@ class ChatSession(ChatSessionBase):
 # ==================================
 # 뉴스 기사 스키마
 # ==================================
+
+# ==================================
+# 상세페이지 정보 준비 스키마 (작업 B)
+# ==================================
+
+
+class DetailButton(BaseModel):
+    """상세페이지 버튼 정보"""
+
+    type: Literal["HS_CODE", "REGULATION", "STATISTICS"]
+    label: str = Field(..., description="버튼 레이블")
+    url: str = Field(..., description="버튼 URL")
+    query_params: Optional[Dict[str, str]] = Field(
+        default=None, description="쿼리 파라미터"
+    )
+    priority: int = Field(..., description="버튼 우선순위")
+
+
+class DetailPageInfo(BaseModel):
+    """상세페이지 정보 모델"""
+
+    hscode: Optional[str] = None
+    detected_intent: str = Field(default="hscode_search")
+    detail_buttons: List[DetailButton] = Field(default_factory=list)
+    processing_time_ms: int = Field(default=0)
+    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    analysis_source: Literal["context7", "fallback", "cache"] = Field(
+        default="fallback"
+    )
+    context7_metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Context7 분석 메타데이터"
+    )
+
+
+class Context7AnalysisResult(BaseModel):
+    """Context7 분석 결과"""
+
+    hscode_patterns: List[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    library_docs_used: List[str] = Field(default_factory=list)
+    total_tokens: int = Field(default=0)
+    api_calls: int = Field(default=0)
+    processing_time_ms: int = Field(default=0)
+    success: bool = Field(default=False)

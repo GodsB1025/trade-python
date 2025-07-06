@@ -23,6 +23,7 @@ from app.models.schemas import TradeNewsCreate
 from app.utils.llm_response_parser import (
     extract_citation_urls_from_ai_message,
     extract_json_from_ai_message,
+    extract_text_from_anthropic_response,
 )
 
 if TYPE_CHECKING:
