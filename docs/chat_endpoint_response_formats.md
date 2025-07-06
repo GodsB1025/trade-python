@@ -1,4 +1,4 @@
-# /chat 엔드포인트 응답 형식 상세 분석
+# /chat 엔드포인트 응답 형식 상세 분석 (v2.0)
 
 ## 목차
 1. [개요](#개요)
@@ -6,19 +6,23 @@
 3. [응답 형식 분류](#응답-형식-분류)
 4. [JSON 응답 형식](#json-응답-형식)
 5. [SSE 스트리밍 응답 형식](#sse-스트리밍-응답-형식)
-6. [HSCode 분류 정보 요청 응답](#hscode-분류-정보-요청-응답)
-7. [에러 처리](#에러-처리)
-8. [병렬 처리 이벤트](#병렬-처리-이벤트)
+6. [HSCode 분류 처리](#hscode-분류-처리)
+7. [병렬 처리 이벤트](#병렬-처리-이벤트)
+8. [에러 처리](#에러-처리)
 
 ---
 
 ## 개요
 
 `/api/v1/chat` 엔드포인트는 **2가지 응답 형식**을 제공합니다:
-1. **JSON Response** - 화물통관 조회 및 충분한 정보가 있는 HSCode 분류 시
-2. **SSE Streaming Response** - 일반 채팅 및 HSCode 분류 정보 요청 시
 
-응답 형식은 의도 분류 결과와 정보 충분성에 따라 자동으로 결정됩니다.
+1. **JSON Response** - **화물통관 조회만** 해당
+2. **SSE Streaming Response** - **HSCode 분류, 일반 채팅** 등 모든 경우
+
+**주요 변경사항 (v2.0):**
+- **HSCode 분류**: 정보 부족 시에도 JSON 응답 없이 SSE 스트리밍으로 정보 요청
+- **SSE 이벤트 표준화**: 명확한 이벤트 네이밍 (`chat_*`, `parallel_*`, `detail_*`)
+- **의도 분류 단순화**: 화물통관만 JSON, 나머지는 모두 SSE
 
 ---
 
@@ -27,20 +31,25 @@
 ```mermaid
 graph TD
     A[POST /api/v1/chat] --> B[ChatRequest 수신]
-    B --> C[IntentClassificationService 호출]
-    C --> D[check_unified_intent 실행]
-    D --> E{특수 의도 감지?}
-    E -->|cargo_tracking| F[JSONResponse 반환]
-    E -->|hscode_classification| G{정보 충분성 확인}
-    G -->|충분| H[JSONResponse 반환]
-    G -->|불충분| I[SSE 정보 요청 응답]
-    E -->|general_chat| J[SSE StreamingResponse 반환]
-    F --> K[화물통관 조회]
-    H --> L[HSCode 분류 수행]
-    I --> M[HSCode 정보 요청]
-    J --> N[일반 채팅 처리]
-    N --> O[병렬 처리 시작]
-    O --> P[상세페이지 정보 준비]
+    B --> C[check_unified_intent 실행]
+    C --> D{의도 분류}
+    D -->|cargo_tracking| E[JSONResponse 반환]
+    D -->|hscode_classification| F[SSE 스트리밍 - 전문 LLM]
+    D -->|general_chat| G[SSE 스트리밍 - 일반 LLM]
+    D -->|기타 의도| H[SSE 스트리밍 - 일반 LLM]
+    
+    E --> I[화물통관 조회]
+    F --> J[HSCode 전문 분류]
+    F --> K[정보 충분성 분석]
+    K -->|충분| L[전문 HSCode 분류]
+    K -->|부족| M[정보 요청 메시지]
+    
+    G --> N[일반 채팅 처리]
+    H --> N
+    
+    J --> O[병렬 처리 시작]
+    N --> O
+    O --> P[상세페이지 버튼 준비]
     O --> Q[채팅 기록 저장]
 ```
 
@@ -48,27 +57,27 @@ graph TD
 
 ## 응답 형식 분류
 
-### 1. 의도 분류 및 정보 충분성 기준
+### 1. 의도별 응답 형식
 
-| 의도 타입               | 정보 상태 | 응답 형식  | 처리 서비스                 |
-| ----------------------- | --------- | ---------- | --------------------------- |
-| `cargo_tracking`        | 항상 적용 | JSON       | CargoTrackingService        |
-| `hscode_classification` | 정보 충분 | JSON       | HSCodeClassificationService |
-| `hscode_classification` | 정보 부족 | SSE Stream | 특별한 정보 요청 메시지     |
-| `general_chat`          | 항상 적용 | SSE Stream | ChatService                 |
-| `news_inquiry`          | 항상 적용 | SSE Stream | ChatService                 |
-| `regulatory_inquiry`    | 항상 적용 | SSE Stream | ChatService                 |
+| 의도 타입               | 응답 형식  | LLM 모델                   | 특징                  |
+| ----------------------- | ---------- | -------------------------- | --------------------- |
+| `cargo_tracking`        | JSON       | -                          | 즉시 화물정보 추출    |
+| `hscode_classification` | SSE Stream | hscode_llm_with_web_search | 전문 HSCode 분류      |
+| `general_chat`          | SSE Stream | news_chat_model            | 일반 채팅 + 병렬 처리 |
+| `news_inquiry`          | SSE Stream | news_chat_model            | 뉴스 질의 + 병렬 처리 |
+| `regulatory_inquiry`    | SSE Stream | news_chat_model            | 규제 질의 + 병렬 처리 |
 
-### 2. HSCode 분류 정보 충분성 판단 기준
+### 2. HSCode 분류 정보 충분성 처리
 
-**정보 부족으로 판단되는 경우:**
-- 기본적인 키워드만 있고 상세 정보가 없는 경우
-- 메시지 길이가 30자 이하인 경우
-- 제품명만 있고 기술적 사양이나 용도 정보가 없는 경우
+**이전 (v1.0)**: 정보 부족 시 JSON 응답으로 정보 요청  
+**현재 (v2.0)**: 정보 부족 시에도 SSE 스트리밍으로 정보 요청
 
-**정보 충분으로 판단되는 경우:**
-- 제품의 상세 사양, 용도, 재료 등이 포함된 경우
-- 모델명, 제조사, 기능 등의 구체적 정보가 포함된 경우
+```python
+# HSCode 분류는 항상 SSE 스트리밍으로 처리
+elif intent_type == IntentType.HSCODE_CLASSIFICATION:
+    logger.info("HSCode 분류는 SSE 스트리밍으로 처리하기 위해 일반 채팅으로 분류")
+    return None  # SSE 스트리밍으로 처리
+```
 
 ### 3. 응답 헤더
 
@@ -97,7 +106,7 @@ X-Accel-Buffering: no
 
 ## JSON 응답 형식
 
-### 1. 화물통관 조회 (cargo_tracking)
+### 화물통관 조회 전용 (cargo_tracking)
 
 #### 성공 응답
 ```json
@@ -141,108 +150,42 @@ X-Accel-Buffering: no
 }
 ```
 
-### 2. HSCode 분류 (충분한 정보가 있는 경우)
-
-#### 정보 수집 단계
-```json
-{
-  "type": "information_request",
-  "service": "hscode_classification",
-  "stage": "information_gathering",
-  "message": "안녕하세요! 😊 스마트폰 HSCode 분류를 도와드리겠습니다.\n\n스마트폰은 복합적인 기능을 가진 전자제품이라 정확한 HSCode 분류를 위해서는 제품의 상세한 특성을 파악해야 합니다...",
-  "next_stage": "classification",
-  "timestamp": "2025-07-06T12:39:43.629Z",
-  "session_uuid": "f8a67849-309e-41dd-af9a-77c0b861ec03",
-  "user_id": 4,
-  "processing_time_ms": 1500
-}
-```
-
-#### 분류 결과 단계
-```json
-{
-  "type": "classification_result",
-  "service": "hscode_classification",
-  "stage": "classification",
-  "result": {
-    "hscode": "8517.12.0000",
-    "confidence_score": 0.85,
-    "classification_reason": "스마트폰은 음성 통신과 데이터 통신이 가능한 휴대용 무선전화기에 해당합니다...",
-    "gri_application": "GRI 1 적용 - 전화기 및 기타 장치 (제8517호)",
-    "alternative_codes": ["8517.13.0000", "8471.30.0000"],
-    "verification_sources": ["WCO 분류 가이드", "관세청 고시"],
-    "recommendations": [
-      "Binding Ruling 신청 권장",
-      "구체적 모델별 확인 필요"
-    ],
-    "risk_assessment": "일반적인 스마트폰 분류로 적절하나, 특수 기능 있는 경우 재검토 필요"
-  },
-  "next_stage": "verification",
-  "timestamp": "2025-07-06T12:39:43.629Z",
-  "session_uuid": "f8a67849-309e-41dd-af9a-77c0b861ec03",
-  "user_id": 4,
-  "processing_time_ms": 2800
-}
-```
-
-#### 검증 단계
-```json
-{
-  "type": "verification_result",
-  "service": "hscode_classification",
-  "stage": "verification",
-  "message": "분류 결과를 검증했습니다. HSCode 8517.12.0000이 적절한 분류입니다...",
-  "completed": true,
-  "timestamp": "2025-07-06T12:39:43.629Z",
-  "session_uuid": "f8a67849-309e-41dd-af9a-77c0b861ec03",
-  "user_id": 4,
-  "processing_time_ms": 1200
-}
-```
-
-#### 에러 응답
-```json
-{
-  "type": "error",
-  "service": "hscode_classification",
-  "stage": "information_gathering",
-  "message": "HSCode 분류 정보 수집 중 오류가 발생했습니다. 다시 시도해주세요.",
-  "error_detail": "LLM 호출 시간 초과",
-  "timestamp": "2025-07-06T12:39:43.629Z",
-  "session_uuid": "f8a67849-309e-41dd-af9a-77c0b861ec03",
-  "user_id": 4
-}
-```
-
 ---
 
-## SSE 스트리밍 응답 형식
+## SSE 스트리밍 응답 형식 (v2.0 표준화)
 
 ### 1. 기본 이벤트 구조
 
-모든 SSE 이벤트는 Anthropic Claude API 형식을 따릅니다:
+모든 SSE 이벤트는 명확한 이벤트 이름을 가집니다:
 
 ```
-event: {event_type}
+event: {event_name}
 data: {json_data}
 
 ```
 
-### 2. 이벤트 순서
+### 2. 표준화된 이벤트 순서
 
-1. **session_info** - 세션 정보
-2. **message_start** - 메시지 시작
-3. **content_block_start** - 컨텐츠 블록 시작
-4. **content_block_delta** - 스트리밍 텍스트 청크
-5. **content_block_stop** - 컨텐츠 블록 종료
-6. **message_delta** - 메시지 메타데이터
-7. **message_stop** - 메시지 종료
+1. **chat_session_info** - 세션 정보
+2. **chat_message_start** - 메시지 시작
+3. **chat_metadata_start** - 메타데이터 블록 시작 (새 세션만)
+4. **chat_metadata_stop** - 메타데이터 블록 종료 (새 세션만)
+5. **chat_content_start** - 텍스트 블록 시작
+6. **parallel_processing** - 병렬 처리 시작
+7. **chat_content_delta** - 스트리밍 텍스트 청크 (연속)
+8. **detail_buttons_start** - 상세페이지 버튼 준비 시작
+9. **detail_button_ready** - 개별 버튼 준비 완료 (반복)
+10. **detail_buttons_complete** - 모든 버튼 준비 완료
+11. **chat_content_stop** - 텍스트 블록 종료
+12. **chat_message_delta** - 메시지 메타데이터
+13. **chat_message_limit** - 메시지 제한 정보
+14. **chat_message_stop** - 메시지 종료
 
 ### 3. 이벤트 상세
 
-#### session_info
+#### chat_session_info
 ```
-event: session_info
+event: chat_session_info
 data: {
   "session_uuid": "f8a67849-309e-41dd-af9a-77c0b861ec03",
   "timestamp": 1720263584.2559748
@@ -250,9 +193,9 @@ data: {
 
 ```
 
-#### message_start
+#### chat_message_start
 ```
-event: message_start
+event: chat_message_start
 data: {
   "type": "message_start",
   "message": {
@@ -270,76 +213,9 @@ data: {
 
 ```
 
-#### content_block_start
+#### chat_metadata_start/stop (새 세션 시)
 ```
-event: content_block_start
-data: {
-  "type": "content_block_start",
-  "index": 0,
-  "content_block": {
-    "start_timestamp": "2025-07-06T12:39:43.629Z",
-    "stop_timestamp": null,
-    "type": "text",
-    "text": "",
-    "citations": []
-  }
-}
-
-```
-
-#### content_block_delta
-```
-event: content_block_delta
-data: {
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "text_delta",
-    "text": "안녕하세요! "
-  }
-}
-
-```
-
-#### content_block_stop
-```
-event: content_block_stop
-data: {
-  "type": "content_block_stop",
-  "index": 0,
-  "stop_timestamp": "2025-07-06T12:39:43.629Z"
-}
-
-```
-
-#### message_delta
-```
-event: message_delta
-data: {
-  "type": "message_delta",
-  "delta": {
-    "stop_reason": "end_turn",
-    "stop_sequence": null
-  }
-}
-
-```
-
-#### message_stop
-```
-event: message_stop
-data: {
-  "type": "message_stop"
-}
-
-```
-
-### 4. 메타데이터 블록 (새 세션 시)
-
-새 세션이 생성된 경우 메타데이터 블록이 추가됩니다:
-
-```
-event: content_block_start
+event: chat_metadata_start
 data: {
   "type": "content_block_start",
   "index": 0,
@@ -355,98 +231,256 @@ data: {
 
 ```
 
----
-
-## HSCode 분류 정보 요청 응답
-
-### 1. 정보 부족 시 SSE 스트리밍 응답
-
-HSCode 분류 의도가 감지되었으나 정보가 부족한 경우, 다음과 같은 특별한 SSE 스트리밍 응답을 제공합니다:
-
-#### message_start (특별 서비스)
+#### chat_content_start
 ```
-event: message_start
+event: chat_content_start
 data: {
-  "type": "message_start",
-  "message": {
-    "id": "chatcompl_a59ab9545bf64cd7b91afd27",
-    "type": "message",
-    "role": "assistant",
-    "model": "special_service",
-    "parent_uuid": "12345678-1234-5678-9012-123456789012",
-    "uuid": "87654321-4321-8765-2109-876543210987",
-    "content": [],
-    "stop_reason": null,
+  "type": "content_block_start",
+  "index": 1,
+  "content_block": {
+    "start_timestamp": "2025-07-06T12:39:43.629Z",
+    "stop_timestamp": null,
+    "type": "text",
+    "text": "",
+    "citations": []
+  }
+}
+
+```
+
+#### chat_content_delta
+```
+event: chat_content_delta
+data: {
+  "type": "content_block_delta",
+  "index": 1,
+  "delta": {
+    "type": "text_delta",
+    "text": "안녕하세요! "
+  }
+}
+
+```
+
+#### chat_content_stop
+```
+event: chat_content_stop
+data: {
+  "type": "content_block_stop",
+  "index": 1,
+  "stop_timestamp": "2025-07-06T12:39:43.629Z"
+}
+
+```
+
+#### chat_message_delta
+```
+event: chat_message_delta
+data: {
+  "type": "message_delta",
+  "delta": {
+    "stop_reason": "end_turn",
     "stop_sequence": null
   }
 }
 
 ```
 
-#### 정보 요청 콘텐츠 예시 (전자제품)
+#### chat_message_limit
 ```
-event: content_block_delta
+event: chat_message_limit
 data: {
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "text_delta",
-    "text": "안녕하세요! 😊 전자제품의 HSCode 분류를 도와드리겠습니다.\n\n전자제품은 기능과 기술 사양에 따라 HSCode가 크게 달라집니다.\n\n## 전자제품 HSCode 분류를 위한 상세 정보\n\n### 1. 핵심 기능 분석 (필수)\n- **주요 기능**: 통신, 컴퓨팅, 오디오, 비디오, 제어 등\n- **복합 기능**: 여러 기능이 있는 경우 본질적 특성 판단\n- **독립성**: 단독 사용 가능 여부\n\n### 2. 기술적 사양 (필수)\n- **프로세서**: 종류, 성능, 제조사\n- **메모리**: RAM, ROM, 저장공간\n- **디스플레이**: 크기, 해상도, 터치 여부\n- **배터리**: 용량, 타입, 착탈 가능 여부\n- **연결성**: WiFi, Bluetooth, 5G/4G, NFC 등\n- **센서**: 가속도계, 자이로스코프, 카메라 등"
+  "type": "message_limit",
+  "message_limit": {
+    "type": "within_limit",
+    "resetsAt": null,
+    "remaining": null,
+    "perModelLimit": null
   }
 }
 
 ```
 
-### 2. 제품 카테고리별 정보 요구사항
+#### chat_message_stop
+```
+event: chat_message_stop
+data: {
+  "type": "message_stop"
+}
+
+```
+
+---
+
+## HSCode 분류 처리
+
+### 1. HSCode 의도 감지 시 SSE 스트리밍
+
+HSCode 분류는 **항상 SSE 스트리밍**으로 처리됩니다. 정보 부족 시에도 JSON 응답이 아닌 SSE 스트리밍으로 정보를 요청합니다.
+
+#### 정보 충분성 분석 후 처리
+
+```python
+# 정보 충분성 분석
+is_sufficient, product_category, requirements = (
+    self.hscode_classification_service.analyze_information_sufficiency(
+        chat_request.message
+    )
+)
+
+if not is_sufficient:
+    # 정보 부족 시: 화이트리스트 검색 + 정보 요구사항 안내
+    hscode_prompt = f"""
+{self.hscode_classification_service.create_information_request_response(
+    chat_request.message, product_category, requirements
+)}
+
+---
+
+**🔍 초기 HSCode 검색 시도**
+
+위의 상세 정보를 기다리는 동안, 현재 제공된 정보로 예상 HSCode 범위를 검색해보겠습니다...
+"""
+else:
+    # 정보 충분 시: 전문 HSCode 분류 수행
+    hscode_prompt = """
+당신은 20년 경력의 세계적인 HSCode 분류 전문가입니다.
+
+**Step-Back Analysis (분류 원칙 정의):**
+HSCode 분류의 근본 원칙:
+1. 관세율표 해석에 관한 통칙(GRI) 1-6호를 순서대로 적용
+2. 호(Heading)의 용어와 관련 부/류의 주(Note) 규정 우선
+3. 본질적 특성(Essential Character) 기준으로 판단
+4. 최종 확정 전 위험 요소 평가 필수
+"""
+```
+
+### 2. HSCode 정보 요청 메시지 예시
 
 #### 전자제품 카테고리
-**필수 정보:**
-- 핵심 기능 분석 (통신, 컴퓨팅, 오디오, 비디오 등)
-- 기술적 사양 (프로세서, 메모리, 디스플레이, 배터리, 연결성)
-- 소프트웨어 (운영체제, 주요 앱, 업데이트 가능성)
-- 물리적 특성 (폼팩터, 인터페이스, 내구성)
-- 사용 환경 (사용자, 목적, 설치 방식)
+```
+event: chat_content_delta
+data: {
+  "type": "content_block_delta",
+  "index": 1,
+  "delta": {
+    "type": "text_delta",
+    "text": "안녕하세요! 😊 전자제품의 HSCode 분류를 도와드리겠습니다.\n\n전자제품은 기능과 기술 사양에 따라 HSCode가 크게 달라집니다.\n\n## 전자제품 HSCode 분류를 위한 상세 정보\n\n### 1. 핵심 기능 분석 (필수)\n- **주요 기능**: 통신, 컴퓨팅, 오디오, 비디오, 제어 등\n- **복합 기능**: 여러 기능이 있는 경우 본질적 특성 판단\n- **독립성**: 단독 사용 가능 여부"
+  }
+}
 
-#### 기계류 카테고리
-**필수 정보:**
-- 작동 원리 (동력원, 구동 방식, 제어 방식)
-- 용도 및 기능 (제조, 가공, 운반, 측정 등)
-- 기술적 사양 (용량/출력, 정밀도, 속도)
-- 구조적 특성 (주요 부품, 재료, 크기)
+```
 
-#### 화학제품 카테고리
-**필수 정보:**
-- 화학적 성질 (화학 조성, 분자식, 순도)
-- 물리적 성질 (상태, 색상, 냄새)
-- 용도 및 기능 (원료, 첨가제, 최종 제품)
-- 안전 정보 (위험성, 취급 주의사항, 규제 사항)
+### 3. 전문 HSCode 분류 모델
 
-### 3. 정보 요청 메시지 구조
+HSCode 분류 시 `hscode_llm_with_web_search` 모델을 사용하여 화이트리스트 기반 웹 검색과 함께 전문적인 분류를 수행합니다.
 
-```javascript
-// 제품 카테고리별 맞춤형 인사말
-const greeting = {
-  electronics: "안녕하세요! 😊 전자제품의 HSCode 분류를 도와드리겠습니다.",
-  machinery: "안녕하세요! 😊 기계류의 HSCode 분류를 도와드리겠습니다.",
-  chemical: "안녕하세요! 😊 화학제품의 HSCode 분류를 도와드리겠습니다.",
-  general: "안녕하세요! 😊 제품의 HSCode 분류를 도와드리겠습니다."
-};
+---
 
-// 공통 구조
-const messageStructure = `
-${greeting}
-${intro}
-${requirements}
+## 병렬 처리 이벤트
 
-**중요한 이유:**
-- 오분류 시 관세율 차이로 인한 비용 손실 가능
-- 통관 지연 및 세관 검사 위험 증가
-- Binding Ruling 등 사전 심사 제도 활용 가능
+### 1. 병렬 처리 시작
+```
+event: parallel_processing
+data: {
+  "stage": "parallel_processing_start",
+  "content": "3단계 병렬 처리를 시작합니다: 자연어 응답, 상세페이지 준비, 회원 기록 저장",
+  "progress": 15,
+  "timestamp": "2025-07-06T14:44:04.298191Z"
+}
 
-위의 정보들을 최대한 상세히 알려주시면, 더욱 정확한 HSCode 분류를 도와드릴 수 있습니다! 🎯
+```
 
-어떤 정보부터 제공해주시겠어요?
-`;
+### 2. 상세페이지 버튼 준비 시작
+```
+event: detail_buttons_start
+data: {
+  "type": "start",
+  "buttonsCount": 3,
+  "estimatedPreparationTime": 5000,
+  "timestamp": "2025-07-06T14:44:54.642338Z",
+  "processingInfo": {
+    "context7_enabled": true,
+    "fallback_available": true,
+    "cache_checked": true
+  }
+}
+
+```
+
+### 3. 개별 버튼 준비 완료
+```
+event: detail_button_ready
+data: {
+  "type": "button",
+  "buttonType": "HS_CODE",
+  "priority": 1,
+  "url": "/detail/hscode",
+  "title": "HS Code 상세정보",
+  "description": "관세율, 규제정보 등 상세 조회",
+  "isReady": true,
+  "metadata": {
+    "hscode": null,
+    "confidence": 0.4,
+    "source": "fallback",
+    "query_params": {
+      "search": "냉동 피자를 미국에 수출하고싶어. HSCode가 뭐야"
+    }
+  },
+  "actionData": {
+    "queryParams": {
+      "search": "냉동 피자를 미국에 수출하고싶어. HSCode가 뭐야"
+    },
+    "analytics": {
+      "click_tracking": true,
+      "conversion_target": "hs_code_detail_view"
+    }
+  }
+}
+
+```
+
+### 4. 모든 버튼 준비 완료
+```
+event: detail_buttons_complete
+data: {
+  "type": "complete",
+  "totalPreparationTime": 584,
+  "buttonsGenerated": 2,
+  "timestamp": "2025-07-06T14:44:55.473676Z",
+  "summary": {
+    "hscode_detected": null,
+    "confidence_score": 0.4,
+    "analysis_source": "fallback",
+    "fallback_used": true,
+    "cache_hit": false
+  },
+  "performance": {
+    "context7_calls": 0,
+    "context7_latency_ms": 0,
+    "database_queries": 0,
+    "total_processing_time": 584
+  }
+}
+
+```
+
+### 5. 버튼 준비 에러
+```
+event: detail_buttons_error
+data: {
+  "type": "error",
+  "errorCode": "DETAIL_PAGE_TIMEOUT",
+  "errorMessage": "상세페이지 정보 준비 시간 초과",
+  "timestamp": "2025-07-06T14:44:55.473676Z",
+  "fallbackActivated": true,
+  "retryInfo": {
+    "retryable": true,
+    "retryAfter": 30,
+    "maxRetries": 3
+  }
+}
+
 ```
 
 ---
@@ -456,20 +490,20 @@ ${requirements}
 ### 1. 일반 에러 응답
 
 ```
-event: content_block_delta
+event: chat_content_delta
 data: {
   "type": "content_block_delta",
-  "index": 0,
+  "index": 1,
   "delta": {
     "type": "text_delta",
-    "text": "응답 처리 중 오류가 발생했습니다."
+    "text": "AI 응답 생성 중 오류가 발생했습니다."
   }
 }
 
 ```
 
 ```
-event: message_delta
+event: chat_message_delta
 data: {
   "type": "message_delta",
   "delta": {
@@ -480,119 +514,35 @@ data: {
 
 ```
 
-### 2. HSCode 정보 요청 에러
+### 2. 연결 해제 처리
 
-```
-event: content_block_delta
-data: {
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "text_delta",
-    "text": "HSCode 정보 요청 처리 중 오류가 발생했습니다."
-  }
-}
-
+```python
+# 클라이언트 연결 상태 확인
+if await request.is_disconnected():
+    logger.info("클라이언트가 연결을 해제했습니다.")
+    return
 ```
 
-### 3. 연결 해제 처리
-
-클라이언트가 연결을 해제한 경우:
-- 서버에서 `request.is_disconnected()` 확인
-- 스트리밍 즉시 중단
-- 로그에 연결 해제 메시지 기록
-
-### 4. 취소 처리
+### 3. 취소 처리
 
 ```python
 except asyncio.CancelledError:
     logger.info("스트리밍이 취소되었습니다.")
-    # 취소된 응답 내용 일부 로깅
-```
-
----
-
-## 병렬 처리 이벤트
-
-### 1. 병렬 처리 시작
-
-```
-event: content_block_delta
-data: {
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "text_delta",
-    "text": "🔄 3단계 병렬 처리를 시작합니다: 자연어 응답, 상세페이지 준비, 회원 기록 저장"
-  }
-}
-
-```
-
-### 2. 상세페이지 버튼 준비
-
-```
-event: content_block_delta
-data: {
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "detail_buttons_start",
-    "button_count": 3,
-    "processing_status": "준비 중"
-  }
-}
-
-```
-
-### 3. 상세페이지 버튼 완료
-
-```
-event: content_block_delta
-data: {
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "detail_button_ready",
-    "button_data": {
-      "title": "HSCode 상세 조회",
-      "description": "제품의 정확한 HSCode를 조회합니다",
-      "action_type": "hscode_lookup",
-      "url": "/detail/hscode/8517120000"
-    }
-  }
-}
-
-```
-
-### 4. 타임아웃 처리
-
-```
-event: content_block_delta
-data: {
-  "type": "content_block_delta",
-  "index": 0,
-  "delta": {
-    "type": "detail_buttons_timeout",
-    "message": "상세페이지 정보 준비 시간이 초과되었습니다"
-  }
-}
-
+    if response_started and accumulated_response:
+        logger.info(f"취소된 응답 내용 (일부): {accumulated_response[:200]}...")
 ```
 
 ---
 
 ## 로깅 및 디버깅
 
-### 1. 요청 로깅
+### 1. 의도 분류 로깅
 
 ```
-=== 채팅 요청 성공 ===
-사용자 ID: 4
-세션 UUID: f8a67849-309e-41dd-af9a-77c0b861ec03
-메시지 길이: 24
-메시지 내용: 하이? 스마트폰에 대한 HSCode를 알려줘...
-====================
+통합 의도 분류 결과: hscode_classification, 신뢰도: 0.900
+HSCode 분류 의도 감지됨 (SSE 스트리밍 처리): 신뢰도 0.900
+HSCode 분류는 SSE 스트리밍으로 처리하기 위해 일반 채팅으로 분류
+HSCode 전문 분류 프롬프트 적용됨
 ```
 
 ### 2. 응답 로깅
@@ -610,23 +560,90 @@ data: {
 ====================
 ```
 
-### 3. 특수 의도 로깅
+---
 
-```
-통합 의도 분류 결과: hscode_classification, 신뢰도: 0.900
-HSCode 분류 의도 감지됨: 신뢰도 0.900
-HSCode 분류에 정보가 부족함 - 일반 채팅으로 처리
-HSCode 분류 의도 감지되었으나 정보 부족 - 특별한 정보 요청 메시지 생성
+## 클라이언트 구현 가이드 (v2.0)
+
+### 1. SSE 이벤트 핸들러 (표준화된 이벤트명 사용)
+
+```javascript
+const eventSource = new EventSource('/api/v1/chat');
+
+// 세션 정보
+eventSource.addEventListener('chat_session_info', (event) => {
+  const sessionInfo = JSON.parse(event.data);
+  console.log('세션 UUID:', sessionInfo.session_uuid);
+});
+
+// 메시지 시작
+eventSource.addEventListener('chat_message_start', (event) => {
+  const messageData = JSON.parse(event.data);
+  showTypingIndicator();
+});
+
+// 텍스트 스트리밍
+eventSource.addEventListener('chat_content_delta', (event) => {
+  const deltaData = JSON.parse(event.data);
+  appendText(deltaData.delta.text);
+});
+
+// 병렬 처리 상태
+eventSource.addEventListener('parallel_processing', (event) => {
+  const processData = JSON.parse(event.data);
+  updateProgress(processData.progress, processData.content);
+});
+
+// 상세 버튼 준비
+eventSource.addEventListener('detail_button_ready', (event) => {
+  const buttonData = JSON.parse(event.data);
+  createDetailButton(buttonData);
+});
+
+// 메시지 완료
+eventSource.addEventListener('chat_message_stop', (event) => {
+  hideTypingIndicator();
+  enableInputField();
+});
 ```
 
-### 4. 정보 충분성 분석 로깅
+### 2. JSON 응답 처리 (화물통관만)
 
+```javascript
+const response = await fetch('/api/v1/chat', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(chatRequest)
+});
+
+const contentType = response.headers.get('content-type');
+
+if (contentType?.includes('application/json')) {
+  // 화물통관 조회 결과
+  const jsonData = await response.json();
+  if (jsonData.intent_type === 'cargo_tracking') {
+    handleCargoTrackingResult(jsonData);
+  }
+} else if (contentType?.includes('text/event-stream')) {
+  // SSE 스트리밍 처리
+  handleSSEStream(response);
+}
 ```
-HSCode 정보 충분성 분석:
-- 메시지: "스마트폰 HSCode 알려줘"
-- 제품 카테고리: electronics
-- 충분성: false
-- 이유: 기본 키워드만 있고 상세 정보 없음
+
+### 3. HSCode 정보 요청 인식
+
+```javascript
+eventSource.addEventListener('chat_content_delta', (event) => {
+  const data = JSON.parse(event.data);
+  const text = data.delta.text;
+  
+  // HSCode 정보 요청 메시지 감지
+  if (text.includes('HSCode 분류를 도와드리겠습니다') || 
+      text.includes('상세 정보')) {
+    showHSCodeInfoRequestUI();
+  }
+  
+  appendText(text);
+});
 ```
 
 ---
@@ -635,123 +652,37 @@ HSCode 정보 충분성 분석:
 
 ### 1. 스트리밍 최적화
 
-- 청크 크기: 10자 단위
-- 백프레셔 방지: `await asyncio.sleep(0.001)`
-- 버퍼링 비활성화: `X-Accel-Buffering: no`
+- **청크 크기**: 10자 단위
+- **백프레셔 방지**: `await asyncio.sleep(0.001)`
+- **버퍼링 비활성화**: `X-Accel-Buffering: no`
 
-### 2. 캐싱
+### 2. 전문 LLM 모델 사용
 
-- 의도 분류 결과 캐싱 (TTL: 60초)
-- 최대 100개 항목 유지
-- 해시 기반 캐시 키 생성
+- **HSCode 분류**: `hscode_llm_with_web_search` (화이트리스트 검색 포함)
+- **일반 채팅**: `news_chat_model`
 
-### 3. 타임아웃 설정
+### 3. 병렬 처리
 
-- LLM 호출: 45초
-- 상세페이지 정보: 10초
-- 채팅 저장: 5초
-
----
-
-## 클라이언트 구현 가이드
-
-### 1. JSON 응답 처리
-
-```javascript
-const response = await fetch('/api/v1/chat', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'text/event-stream'
-  },
-  body: JSON.stringify(chatRequest)
-});
-
-if (response.headers.get('content-type')?.includes('application/json')) {
-  const jsonData = await response.json();
-  handleSpecialIntent(jsonData);
-}
-```
-
-### 2. SSE 스트리밍 처리
-
-```javascript
-if (response.headers.get('content-type')?.includes('text/event-stream')) {
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    
-    const chunk = decoder.decode(value);
-    const events = parseSSEEvents(chunk);
-    
-    for (const event of events) {
-      handleSSEEvent(event);
-    }
-  }
-}
-```
-
-### 3. HSCode 정보 요청 처리
-
-```javascript
-function handleSSEEvent(event) {
-  switch (event.type) {
-    case 'message_start':
-      if (event.data.message.model === 'special_service') {
-        // HSCode 정보 요청 특별 처리
-        showHSCodeInfoRequestUI();
-      }
-      break;
-    case 'content_block_delta':
-      if (event.data.delta.type === 'text_delta') {
-        // HSCode 정보 요청 메시지 표시
-        appendHSCodeInfoText(event.data.delta.text);
-      }
-      break;
-  }
-}
-```
-
-### 4. 에러 처리
-
-```javascript
-function handleSSEEvent(event) {
-  switch (event.type) {
-    case 'content_block_delta':
-      if (event.data.delta.stop_reason === 'error') {
-        handleStreamError(event.data);
-      }
-      break;
-    case 'message_delta':
-      if (event.data.delta.stop_reason === 'error') {
-        handleStreamError(event.data);
-      }
-      break;
-  }
-}
-```
+- **AI 응답 스트리밍**과 **상세페이지 준비** 동시 실행
+- **채팅 기록 저장** 백그라운드 처리
 
 ---
 
 ## 요약
 
-`/api/v1/chat` 엔드포인트는 의도 분류 결과와 정보 충분성에 따라 **JSON 응답**과 **SSE 스트리밍 응답**을 제공합니다.
+### 주요 변경사항 (v2.0)
 
-### 주요 개선사항 (v2.0)
+1. **HSCode 처리 개선**: 모든 HSCode 분류를 SSE 스트리밍으로 처리
+2. **SSE 이벤트 표준화**: 명확한 이벤트 네이밍 컨벤션 적용
+3. **JSON 응답 단순화**: 화물통관 조회만 JSON 응답
+4. **전문 LLM 활용**: HSCode 분류 시 전문 모델 사용
+5. **병렬 처리 개선**: 상세페이지 버튼과 AI 응답 병렬 처리
 
-1. **HSCode 분류 개선**: 정보 부족 시 JSON 응답 대신 SSE 스트리밍으로 정보 요청
-2. **제품 카테고리별 맞춤형 정보 요구**: 전자제품, 기계류, 화학제품별 특화된 정보 요구사항
-3. **정확도 향상**: 정보 충분성 분석을 통한 오분류 방지
-4. **사용자 경험 개선**: 친근한 인터페이스와 구체적인 정보 요청 가이드
+### 응답 분기 (최종)
 
-### 응답 분기
+- **화물통관 조회**: JSON 응답
+- **HSCode 분류**: SSE 스트리밍 (정보 요청 포함)
+- **일반 채팅**: SSE 스트리밍 + 병렬 처리
+- **뉴스/규제 질의**: SSE 스트리밍 + 병렬 처리
 
-- **화물통관 조회**: 항상 JSON 응답
-- **HSCode 분류 (정보 충분)**: JSON 응답
-- **HSCode 분류 (정보 부족)**: SSE 스트리밍 정보 요청
-- **일반 채팅**: SSE 스트리밍 응답 + 병렬 처리 이벤트
-
-모든 응답은 Anthropic Claude API 형식을 따르며, 강력한 에러 처리와 성능 최적화가 적용되어 있습니다. 
+모든 SSE 이벤트는 표준화된 네이밍을 사용하며, 프론트엔드에서 쉽게 파싱할 수 있도록 개선되었습니다. 

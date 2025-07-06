@@ -1,271 +1,144 @@
-# Trade Python AI Service
+# 무역 규제 레이더 플랫폼 백엔드
 
-LangChain + Claude + FastAPI 기반 웹 검색 AI 서비스
+AI 기반 무역 규제 분석 및 HSCode 분류 서비스를 제공하는 FastAPI 백엔드 시스템입니다.
 
-## 🚀 주요 기능
+## 주요 기능
 
-- **Claude 4 Sonnet 모델** 기반 AI 응답
-- **Anthropic 공식 웹 검색 도구** 활용
-- **다중 웹 검색** 수행 (general, news, academic, technical)
-- **Prompt Chaining** 메커니즘
-- **대화 상태 관리** 및 세션 유지
-- **구조화된 JSON 응답** (Spring Boot 연동)
-- **FastAPI** 기반 REST API
+- AI 기반 HSCode 분류 및 무역 규제 분석
+- 실시간 채팅 스트리밍 (SSE)
+- 화물통관 조회 서비스
+- 상세페이지 정보 자동 생성
+- 다국어 지원 (한국어 우선)
 
-## 🏗️ 아키텍처
+## 📡 SSE 이벤트 구조 (v2.0 표준화)
 
-```
-┌─────────────────┐    HTTP/JSON    ┌─────────────────┐
-│   Spring Boot   │ ────────────── │   FastAPI       │
-│   (Frontend)    │                │   (Python)      │
-└─────────────────┘                └─────────────────┘
-                                            │
-                                            ▼
-                                   ┌─────────────────┐
-                                   │   LangChain     │
-                                   │   Service       │
-                                   └─────────────────┘
-                                            │
-                                            ▼
-                                   ┌─────────────────┐
-                                   │   Claude 4      │
-                                   │   Sonnet        │
-                                   │   + Web Search  │
-                                   └─────────────────┘
-```
+### 개선된 이벤트 네이밍 컨벤션
 
-## 📁 프로젝트 구조
+모든 SSE 이벤트에 명확한 이벤트 이름을 부여하여 프론트엔드에서 쉽게 파싱할 수 있도록 개선했습니다.
 
-```
-trade-python/
-├── app/
-│   ├── main.py              # FastAPI 메인 애플리케이션
-│   │   ├── schemas.py       # Pydantic 스키마 정의
-│   │   └── chat_models.py   # 대화 상태 관리 모델
-│   ├── services/
-│   │   ├── anthropic_service.py   # Claude API 서비스
-│   │   └── langchain_service.py   # LangChain 통합 서비스
-│   ├── chains/
-│   │   └── prompt_chains.py       # 프롬프트 체이닝 로직
-│   └── utils/
-│       └── config.py              # 설정 관리
-├── main.py                  # 엔트리포인트
-├── pyproject.toml          # 의존성 관리
-└── .env.example           # 환경 변수 예시
+#### 1. 채팅 관련 이벤트
+```typescript
+// 세션 정보
+event: chat_session_info
+data: {"session_uuid": "uuid", "timestamp": 123456}
+
+// 메시지 시작/종료
+event: chat_message_start
+event: chat_message_delta
+event: chat_message_limit  
+event: chat_message_stop
+
+// 컨텐츠 블록 (실제 텍스트)
+event: chat_content_start
+event: chat_content_delta    // 스트리밍 텍스트 청크
+event: chat_content_stop
+
+// 메타데이터 (새 세션인 경우)
+event: chat_metadata_start
+event: chat_metadata_stop
 ```
 
-## 🛠️ 설치 및 실행
+#### 2. 병렬 처리 이벤트
+```typescript
+// 병렬 처리 상태
+event: parallel_processing
+data: {
+  "stage": "parallel_processing_start",
+  "content": "3단계 병렬 처리를 시작합니다...",
+  "progress": 15,
+  "timestamp": "2025-07-06T14:44:04.298191Z"
+}
+```
 
-### 1. 프로젝트 클론
+#### 3. 상세페이지 버튼 이벤트
+```typescript
+// 버튼 준비 시작/완료
+event: detail_buttons_start
+event: detail_button_ready      // 개별 버튼
+event: detail_buttons_complete
+event: detail_buttons_error
+```
+
+### 프론트엔드 파싱 가이드
+
+**Before (문제):**
+```javascript
+// 이벤트 타입을 data 내부에서 찾아야 함
+eventSource.addEventListener('message', (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'content_block_delta') {
+    // 텍스트 처리
+  }
+});
+```
+
+**After (해결):**
+```javascript
+// 명확한 이벤트 이름으로 직접 처리
+eventSource.addEventListener('chat_content_delta', (event) => {
+  const data = JSON.parse(event.data);
+  appendText(data.delta.text);
+});
+
+eventSource.addEventListener('parallel_processing', (event) => {
+  const data = JSON.parse(event.data);
+  updateProgress(data.progress, data.content);
+});
+
+eventSource.addEventListener('detail_button_ready', (event) => {
+  const button = JSON.parse(event.data);
+  addDetailButton(button);
+});
+```
+
+### 이벤트 흐름 순서
+
+1. `chat_session_info` - 세션 정보
+2. `chat_message_start` - 메시지 시작
+3. `chat_metadata_start/stop` - 새 세션인 경우 메타데이터
+4. `chat_content_start` - 컨텐츠 블록 시작
+5. `parallel_processing` - 병렬 처리 시작
+6. `chat_content_delta` (연속) - 실제 텍스트 스트리밍
+7. `detail_buttons_start` - 상세버튼 준비 시작
+8. `detail_button_ready` (반복) - 개별 버튼 준비 완료
+9. `detail_buttons_complete` - 모든 버튼 준비 완료
+10. `chat_content_stop` - 컨텐츠 블록 종료
+11. `chat_message_delta` - 메시지 메타데이터
+12. `chat_message_limit` - 메시지 제한 정보
+13. `chat_message_stop` - 메시지 종료
+
+## 🚀 빠른 시작
+
+### 환경 설정
 
 ```bash
-git clone <repository-url>
-cd trade-python
-```
+# 의존성 설치
+uv sync
 
-### 2. 환경 설정
-
-```bash
-# .env 파일 생성
+# 환경 변수 설정
 cp .env.example .env
+# .env 파일 수정 (API 키 등)
 
-# Anthropic API 키 설정 (필수)
-# .env 파일에서 ANTHROPIC_API_KEY 값을 실제 API 키로 변경
+# 서버 실행
+uv run python main.py
 ```
 
-### 3. 의존성 설치
+### API 엔드포인트
 
-```bash
-# uv 사용 (권장)
-uv install
+- **POST /api/v1/chat** - AI 채팅 (SSE 스트리밍)
+- **GET /api/v1/monitoring/health** - 서버 상태 확인
+- **GET /docs** - API 문서 (Swagger UI)
 
-# 또는 pip 사용
-pip install -e .
-```
+## 📚 추가 문서
 
-### 4. 서비스 실행
+- `docs/` 디렉토리에서 상세 문서 확인
+- `PYTHON_SERVER_GUIDE.md` - 서버 설정 가이드
+- `reflection/` 디렉토리 - 개발 히스토리
 
-```bash
-# 개발 모드
-python main.py
+## 🔧 개발 환경
 
-# 또는 직접 uvicorn 실행
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-## 📡 API 엔드포인트
-
-### 1. 채팅 API (Spring Boot 연동용)
-
-```http
-POST /api/chat
-Content-Type: application/json
-
-{
-  "message": "사용자 메시지",
-  "session_id": "optional-session-id",
-  "enable_web_search": true,
-  "search_types": ["general", "news"]
-}
-```
-
-**응답 예시:**
-```json
-{
-  "message": "AI 응답 메시지",
-  "session_id": "session-uuid",
-  "ai_response": {
-    "content": "상세 응답 내용",
-    "confidence_score": 0.95,
-    "sources_used": ["http://example.com"],
-    "reasoning_steps": ["1단계", "2단계"],
-    "metadata": {}
-  },
-  "web_search_results": {
-    "query": "검색 쿼리",
-    "total_results": 5,
-    "results": [...],
-    "search_duration_ms": 1500
-  },
-  "conversation_history": [...],
-  "processing_time_ms": 2000,
-  "timestamp": "2024-01-01T00:00:00Z"
-}
-```
-
-### 2. 웹 검색 전용 API
-
-```http
-POST /api/search
-Content-Type: application/json
-
-{
-  "query": "검색할 내용",
-  "search_types": ["general", "academic"],
-  "max_results_per_search": 5
-}
-```
-
-### 3. 헬스체크
-
-```http
-GET /health
-```
-
-### 4. 세션 관리
-
-```http
-# 세션 정보 조회
-GET /api/session/{session_id}
-
-# 세션 삭제
-DELETE /api/session/{session_id}
-```
-
-## 🔧 주요 설정
-
-### 환경 변수
-
-| 변수명                | 설명                    | 기본값                     |
-| --------------------- | ----------------------- | -------------------------- |
-| `ANTHROPIC_API_KEY`   | Anthropic API 키 (필수) | -                          |
-| `ANTHROPIC_MODEL`     | 사용할 Claude 모델      | `claude-3-5-sonnet-latest` |
-| `WEB_SEARCH_MAX_USES` | 웹 검색 최대 횟수       | `5`                        |
-| `DEBUG`               | 디버그 모드             | `false`                    |
-| `CORS_ORIGINS`        | CORS 허용 도메인        | Spring Boot 기본 포트      |
-
-## 🔍 프롬프트 체이닝
-
-1. **쿼리 분석**: 사용자 질문 분석 및 검색 전략 수립
-2. **다중 검색**: 타입별 웹 검색 수행
-3. **결과 종합**: 검색 결과 분석 및 중간 답변 생성
-4. **최종 합성**: 모든 정보를 종합한 최종 응답 생성
-
-## 🤝 Spring Boot 연동 예시
-
-### Spring Boot RestTemplate 사용
-
-```java
-@Service
-public class PythonAIService {
-    
-    @Autowired
-    private RestTemplate restTemplate;
-    
-    @Value("${python.ai.url:http://localhost:8000}")
-    private String pythonAiUrl;
-    
-    public ChatResponse sendMessage(ChatRequest request) {
-        return restTemplate.postForObject(
-            pythonAiUrl + "/api/chat",
-            request,
-            ChatResponse.class
-        );
-    }
-}
-```
-
-### Spring Boot WebClient 사용 (비동기)
-
-```java
-@Service
-public class PythonAIService {
-    
-    private final WebClient webClient;
-    
-    public PythonAIService() {
-        this.webClient = WebClient.builder()
-            .baseUrl("http://localhost:8000")
-            .build();
-    }
-    
-    public Mono<ChatResponse> sendMessageAsync(ChatRequest request) {
-        return webClient.post()
-            .uri("/api/chat")
-            .bodyValue(request)
-            .retrieve()
-            .bodyToMono(ChatResponse.class);
-    }
-}
-```
-
-## 🧪 테스트
-
-```bash
-# 헬스체크 테스트
-curl http://localhost:8000/health
-
-# 채팅 테스트
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "최신 AI 뉴스를 알려줘",
-    "enable_web_search": true,
-    "search_types": ["news"]
-  }'
-```
-
-## 📝 개발 노트
-
-### 구현된 기능
-
-- ✅ Claude 4 Sonnet 통합
-- ✅ Anthropic 웹 검색 도구
-- ✅ 다중 검색 타입 지원
-- ✅ 프롬프트 체이닝
-- ✅ 대화 상태 관리
-- ✅ 구조화된 JSON 응답
-- ✅ FastAPI REST API
-- ✅ Spring Boot 연동 준비
-
-### 향후 개선 사항
-
-- [ ] 검색 결과 캐싱
-- [ ] 대화 내용 영구 저장
-- [ ] 더 정교한 프롬프트 체이닝
-- [ ] 모니터링 및 로깅 강화
-- [ ] 부하 테스트 및 성능 최적화
-
-## �� 라이선스
-
-MIT License
+- Python 3.11+
+- FastAPI
+- SQLAlchemy (비동기)
+- LangChain
+- Anthropic Claude API

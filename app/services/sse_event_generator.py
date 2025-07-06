@@ -17,7 +17,7 @@ class SSEEventGenerator:
             "progress": progress,
             "timestamp": datetime.utcnow().isoformat() + "Z",
         }
-        return f"event: thinking\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        return f"event: parallel_processing\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def generate_detail_buttons_start_event(self, buttons_count: int = 3) -> str:
         """상세페이지 버튼 준비 시작 이벤트"""
@@ -32,7 +32,7 @@ class SSEEventGenerator:
                 "cache_checked": True,
             },
         }
-        return f"event: detail_page_buttons_start\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        return f"event: detail_buttons_start\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     async def generate_detail_button_events(
         self, detail_info: DetailPageInfo
@@ -63,7 +63,7 @@ class SSEEventGenerator:
                 },
             }
 
-            yield f"event: detail_page_button_ready\ndata: {json.dumps(button_data, ensure_ascii=False)}\n\n"
+            yield f"event: detail_button_ready\ndata: {json.dumps(button_data, ensure_ascii=False)}\n\n"
 
             # 버튼 간 간격 (UX 개선)
             await asyncio.sleep(0.1)
@@ -96,7 +96,7 @@ class SSEEventGenerator:
                 "total_processing_time": detail_info.processing_time_ms,
             },
         }
-        yield f"event: detail_page_buttons_complete\ndata: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
+        yield f"event: detail_buttons_complete\ndata: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
 
     def generate_detail_buttons_timeout_event(self) -> str:
         """상세페이지 버튼 준비 타임아웃 이벤트"""
@@ -108,7 +108,7 @@ class SSEEventGenerator:
             "fallbackActivated": True,
             "retryInfo": {"retryable": True, "retryAfter": 30, "maxRetries": 3},
         }
-        return f"event: detail_page_buttons_error\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        return f"event: detail_buttons_error\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def generate_detail_buttons_error_event(
         self,
@@ -134,7 +134,7 @@ class SSEEventGenerator:
             },
             "retryInfo": {"retryable": True, "retryAfter": 30, "maxRetries": 3},
         }
-        return f"event: detail_page_buttons_error\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        return f"event: detail_buttons_error\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def _get_button_description(self, button_type: str) -> str:
         """버튼 타입별 설명 반환"""

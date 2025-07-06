@@ -328,7 +328,7 @@ class ChatService:
                     "stop_sequence": None,
                 },
             }
-            yield f"event: message_start\ndata: {json.dumps(message_start_event)}\n\n"
+            yield f"event: chat_message_start\ndata: {json.dumps(message_start_event)}\n\n"
 
             # content_block_start 이벤트
             content_block_event = {
@@ -342,7 +342,7 @@ class ChatService:
                     "citations": [],
                 },
             }
-            yield f"event: content_block_start\ndata: {json.dumps(content_block_event)}\n\n"
+            yield f"event: chat_content_start\ndata: {json.dumps(content_block_event)}\n\n"
 
             # JSON 응답을 텍스트로 변환
             if json_response.get("type") == "preliminary_hscode_info":
@@ -450,7 +450,7 @@ class ChatService:
                     "index": 0,
                     "delta": {"type": "text_delta", "text": chunk},
                 }
-                yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n"
+                yield f"event: chat_content_delta\ndata: {json.dumps(delta_event)}\n\n"
 
                 # 스트리밍 효과를 위한 짧은 지연
                 await asyncio.sleep(0.01)
@@ -461,17 +461,17 @@ class ChatService:
                 "index": 0,
                 "stop_timestamp": datetime.utcnow().isoformat() + "Z",
             }
-            yield f"event: content_block_stop\ndata: {json.dumps(content_stop_event)}\n\n"
+            yield f"event: chat_content_stop\ndata: {json.dumps(content_stop_event)}\n\n"
 
             # message_delta 이벤트
             message_delta_event = {
                 "type": "message_delta",
                 "delta": {"stop_reason": "end_turn", "stop_sequence": None},
             }
-            yield f"event: message_delta\ndata: {json.dumps(message_delta_event)}\n\n"
+            yield f"event: chat_message_delta\ndata: {json.dumps(message_delta_event)}\n\n"
 
             # message_stop 이벤트
-            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+            yield 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'
 
         except Exception as e:
             logger.error(f"JSON to streaming 변환 중 오류: {e}", exc_info=True)
@@ -485,11 +485,11 @@ class ChatService:
                     "text": "응답 처리 중 오류가 발생했습니다.",
                 },
             }
-            yield f"event: content_block_delta\ndata: {json.dumps(error_delta)}\n\n"
+            yield f"event: chat_content_delta\ndata: {json.dumps(error_delta)}\n\n"
 
             # 에러 종료
-            yield f'event: message_delta\ndata: {{"type":"message_delta","delta":{{"stop_reason":"error","stop_sequence":null}}}}\n\n'
-            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+            yield f'event: chat_message_delta\ndata: {{"type":"message_delta","delta":{{"stop_reason":"error","stop_sequence":null}}}}\n\n'
+            yield 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'
 
     async def stream_chat_response(
         self,
@@ -708,7 +708,7 @@ HSCode 분류의 근본 원칙:
                     "stop_sequence": None,
                 },
             }
-            yield f"event: message_start\ndata: {json.dumps(message_start_event)}\n\n"
+            yield f"event: chat_message_start\ndata: {json.dumps(message_start_event)}\n\n"
 
             # 세션 ID가 새로 생성된 경우, 별도의 metadata content block으로 전송
             content_index = 0
@@ -723,7 +723,7 @@ HSCode 분류의 근본 원칙:
                         "metadata": {"session_uuid": current_session_uuid},
                     },
                 }
-                yield f"event: content_block_start\ndata: {json.dumps(metadata_block_event)}\n\n"
+                yield f"event: chat_metadata_start\ndata: {json.dumps(metadata_block_event)}\n\n"
 
                 # 메타데이터 블록 종료
                 metadata_stop_event = {
@@ -731,7 +731,7 @@ HSCode 분류의 근본 원칙:
                     "index": content_index,
                     "stop_timestamp": datetime.utcnow().isoformat() + "Z",
                 }
-                yield f"event: content_block_stop\ndata: {json.dumps(metadata_stop_event)}\n\n"
+                yield f"event: chat_metadata_stop\ndata: {json.dumps(metadata_stop_event)}\n\n"
                 content_index += 1
 
             # 메인 텍스트 content block 시작
@@ -746,7 +746,7 @@ HSCode 분류의 근본 원칙:
                     "citations": [],
                 },
             }
-            yield f"event: content_block_start\ndata: {json.dumps(content_block_event)}\n\n"
+            yield f"event: chat_content_start\ndata: {json.dumps(content_block_event)}\n\n"
 
             # 무역 전문가 시스템 프롬프트 추가
             system_prompt = (
@@ -836,7 +836,7 @@ HSCode 분류의 근본 원칙:
                             "index": content_index,
                             "delta": {"type": "text_delta", "text": chunk_text},
                         }
-                        yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n"
+                        yield f"event: chat_content_delta\ndata: {json.dumps(delta_event)}\n\n"
 
             except Exception as stream_error:
                 logger.error(
@@ -849,7 +849,7 @@ HSCode 분류의 근본 원칙:
                     "index": content_index,
                     "delta": {"type": "text_delta", "text": error_text},
                 }
-                yield f"event: content_block_delta\ndata: {json.dumps(error_delta_event)}\n\n"
+                yield f"event: chat_content_delta\ndata: {json.dumps(error_delta_event)}\n\n"
                 ai_response = error_text
 
             # content block 종료
@@ -858,7 +858,7 @@ HSCode 분류의 근본 원칙:
                 "index": content_index,
                 "stop_timestamp": datetime.utcnow().isoformat() + "Z",
             }
-            yield f"event: content_block_stop\ndata: {json.dumps(content_stop_event)}\n\n"
+            yield f"event: chat_content_stop\ndata: {json.dumps(content_stop_event)}\n\n"
 
             # 병렬 처리 나머지 이벤트 전송
             if detail_page_generator:
@@ -918,7 +918,7 @@ HSCode 분류의 근본 원칙:
                 "type": "message_delta",
                 "delta": {"stop_reason": "end_turn", "stop_sequence": None},
             }
-            yield f"event: message_delta\ndata: {json.dumps(message_delta_event)}\n\n"
+            yield f"event: chat_message_delta\ndata: {json.dumps(message_delta_event)}\n\n"
 
             # message_limit 이벤트
             message_limit_event = {
@@ -930,10 +930,10 @@ HSCode 분류의 근본 원칙:
                     "perModelLimit": None,
                 },
             }
-            yield f"event: message_limit\ndata: {json.dumps(message_limit_event)}\n\n"
+            yield f"event: chat_message_limit\ndata: {json.dumps(message_limit_event)}\n\n"
 
             # message_stop 이벤트
-            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+            yield 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'
 
         except Exception as e:
             logger.error(f"채팅 스트림 처리 중 치명적 오류 발생: {e}", exc_info=True)
@@ -951,7 +951,7 @@ HSCode 분류의 근본 원칙:
                 "index": 0,
                 "delta": {"type": "text_delta", "text": error_text},
             }
-            yield f"event: content_block_delta\ndata: {json.dumps(error_delta)}\n\n"
+            yield f"event: chat_content_delta\ndata: {json.dumps(error_delta)}\n\n"
 
             # content block 종료
             error_stop = {
@@ -959,8 +959,8 @@ HSCode 분류의 근본 원칙:
                 "index": 0,
                 "stop_timestamp": datetime.utcnow().isoformat() + "Z",
             }
-            yield f"event: content_block_stop\ndata: {json.dumps(error_stop)}\n\n"
+            yield f"event: chat_content_stop\ndata: {json.dumps(error_stop)}\n\n"
 
             # message 종료
-            yield f'event: message_delta\ndata: {{"type":"message_delta","delta":{{"stop_reason":"error","stop_sequence":null}}}}\n\n'
-            yield 'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+            yield f'event: chat_message_delta\ndata: {{"type":"message_delta","delta":{{"stop_reason":"error","stop_sequence":null}}}}\n\n'
+            yield 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'

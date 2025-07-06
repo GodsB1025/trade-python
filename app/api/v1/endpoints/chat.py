@@ -39,15 +39,18 @@ async def handle_chat(
     - **응답:**
         - `StreamingResponse`: `text/event-stream` 형식의 SSE 스트림.
         - 초기 응답에 session_uuid 포함
-        - Anthropic Claude API 형식의 이벤트:
-          - `event: session_info`: 세션 정보 (session_uuid 포함)
-          - `event: message_start`: 메시지 시작
-          - `event: content_block_start`: 컨텐츠 블록 시작
-          - `event: content_block_delta`: 스트리밍 텍스트 청크
-          - `event: content_block_stop`: 컨텐츠 블록 종료
-          - `event: message_delta`: 메시지 메타데이터 (stop_reason 등)
-          - `event: message_limit`: 메시지 제한 정보
-          - `event: message_stop`: 메시지 종료
+        - 표준화된 SSE 이벤트:
+          - `event: chat_session_info`: 세션 정보 (session_uuid 포함)
+          - `event: chat_message_start`: 메시지 시작
+          - `event: chat_metadata_start/stop`: 메타데이터 블록 시작/종료
+          - `event: chat_content_start`: 컨텐츠 블록 시작
+          - `event: chat_content_delta`: 스트리밍 텍스트 청크
+          - `event: chat_content_stop`: 컨텐츠 블록 종료
+          - `event: parallel_processing`: 병렬 처리 정보
+          - `event: detail_buttons_*`: 상세페이지 버튼 이벤트
+          - `event: chat_message_delta`: 메시지 메타데이터 (stop_reason 등)
+          - `event: chat_message_limit`: 메시지 제한 정보
+          - `event: chat_message_stop`: 메시지 종료
     """
 
     # 성공적인 요청 로깅
@@ -96,7 +99,7 @@ async def handle_chat(
                 "timestamp": asyncio.get_event_loop().time(),
             }
             session_info_json = json.dumps(session_info, ensure_ascii=False)
-            yield f"event: session_info\ndata: {session_info_json}\n\n"
+            yield f"event: chat_session_info\ndata: {session_info_json}\n\n"
 
             # 백프레셔 방지를 위한 짧은 대기
             await asyncio.sleep(0.001)
@@ -125,7 +128,7 @@ async def handle_chat(
                 # 실제 응답 내용 추출 및 누적
                 try:
                     # SSE 형식에서 data 부분 추출
-                    if chunk.startswith("event: content_block_delta\ndata: "):
+                    if chunk.startswith("event: chat_content_delta\ndata: "):
                         data_part = chunk.split("data: ", 1)[1].split("\n\n")[0]
                         delta_data = json.loads(data_part)
 
