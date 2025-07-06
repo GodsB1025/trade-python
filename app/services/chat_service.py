@@ -3,7 +3,15 @@ import json
 import re
 import time  # 추가
 import asyncio  # 추가
-from typing import AsyncGenerator, Dict, Any, List, cast, Union  # Union 추가
+from typing import (
+    AsyncGenerator,
+    Dict,
+    Any,
+    List,
+    cast,
+    Union,
+    Optional,
+)  # Optional 추가
 import uuid
 from datetime import datetime
 
@@ -32,6 +40,9 @@ from app.services.intent_classification_service import (
     IntentClassificationService,
     IntentType,
 )  # 고급 의도 분류 서비스 추가
+from app.services.enhanced_detail_generator import (
+    EnhancedDetailGenerator,
+)  # 상세 정보 생성 서비스 추가
 from app.core.config import settings
 from app.core.llm_provider import llm_provider
 
@@ -219,6 +230,187 @@ async def _save_rag_document_from_web_search_task(
         logger.error(f"백그라운드 RAG 문서 저장 작업 중 오류 발생: {e}", exc_info=True)
 
 
+async def _generate_and_save_enhanced_detail_info_task(
+    hscode: str,
+    product_description: str,
+    user_context: str,
+    message_hash: str,
+    session_uuid: str,
+    user_id: Optional[int] = None,
+):
+    """
+    HSCode에 대한 상세 정보를 생성하고 DB에 저장하는 백그라운드 작업.
+    이 함수는 자체 DB 세션을 생성하여 사용함.
+    """
+    logger.info(f"상세 정보 생성 시작: HSCode {hscode}")
+
+    try:
+        from app.services.enhanced_detail_generator import EnhancedDetailGenerator
+
+        async with SessionLocal() as db:
+            # 상세 정보 생성
+            detail_generator = EnhancedDetailGenerator()
+            enhanced_info = await detail_generator.generate_comprehensive_detail_info(
+                hscode=hscode,
+                product_description=product_description,
+                user_context=user_context,
+                db_session=db,
+            )
+
+            # 기존 분석 결과 찾기
+            from app.models.db_models import DetailPageAnalysis
+            from sqlalchemy import select
+
+            stmt = select(DetailPageAnalysis).where(
+                DetailPageAnalysis.message_hash == message_hash
+            )
+            result = await db.execute(stmt)
+            existing_analysis = result.scalars().first()
+
+            if existing_analysis:
+                # 기존 레코드 업데이트 (setattr 사용)
+                setattr(
+                    existing_analysis,
+                    "tariff_info",
+                    enhanced_info.get("tariff_info", {}),
+                )
+                setattr(
+                    existing_analysis,
+                    "trade_agreement_info",
+                    enhanced_info.get("trade_agreement_info", {}),
+                )
+                setattr(
+                    existing_analysis,
+                    "regulation_info",
+                    enhanced_info.get("regulation_info", {}),
+                )
+                setattr(
+                    existing_analysis,
+                    "non_tariff_info",
+                    enhanced_info.get("non_tariff_info", {}),
+                )
+                setattr(
+                    existing_analysis,
+                    "similar_hscodes_detailed",
+                    enhanced_info.get("similar_hscodes_detailed", {}),
+                )
+                setattr(
+                    existing_analysis,
+                    "market_analysis",
+                    enhanced_info.get("market_analysis", {}),
+                )
+                setattr(
+                    existing_analysis,
+                    "verification_status",
+                    enhanced_info.get("verification_status", "ai_generated"),
+                )
+                setattr(
+                    existing_analysis,
+                    "data_quality_score",
+                    enhanced_info.get("data_quality_score", 0.0),
+                )
+                setattr(
+                    existing_analysis,
+                    "needs_update",
+                    enhanced_info.get("needs_update", False),
+                )
+                setattr(existing_analysis, "last_verified_at", datetime.utcnow())
+                setattr(
+                    existing_analysis,
+                    "expert_opinion",
+                    enhanced_info.get("expert_opinion"),
+                )
+
+                # 기존 메타데이터와 병합
+                current_metadata = getattr(existing_analysis, "analysis_metadata", {})
+                if current_metadata:
+                    current_metadata.update(
+                        enhanced_info.get("generation_metadata", {})
+                    )
+                    setattr(existing_analysis, "analysis_metadata", current_metadata)
+                else:
+                    setattr(
+                        existing_analysis,
+                        "analysis_metadata",
+                        enhanced_info.get("generation_metadata", {}),
+                    )
+
+                await db.commit()
+                logger.info(
+                    f"HSCode {hscode}에 대한 상세 정보 업데이트 완료 (기존 레코드)"
+                )
+            else:
+                # 새로운 분석 레코드 생성
+                from app.models.db_models import DetailPageAnalysis
+
+                # 세션 정보 조회 (단순화 - session_uuid만 확인)
+                valid_session_uuid = None
+                if session_uuid:
+                    try:
+                        from uuid import UUID
+                        from app.models.db_models import ChatSession
+
+                        # 실제 세션이 존재하는지 확인
+                        stmt = (
+                            select(ChatSession.session_uuid)
+                            .where(ChatSession.session_uuid == UUID(session_uuid))
+                            .limit(1)
+                        )
+                        result = await db.execute(stmt)
+                        existing_session_uuid = result.scalar()
+
+                        if existing_session_uuid:
+                            valid_session_uuid = session_uuid
+                            logger.info(f"기존 세션 발견: {session_uuid}")
+                        else:
+                            logger.warning(
+                                f"세션이 존재하지 않음: {session_uuid}, 외래키 참조 없이 저장"
+                            )
+
+                    except Exception as session_check_error:
+                        logger.warning(
+                            f"세션 확인 중 오류: {session_check_error}, 외래키 참조 없이 저장"
+                        )
+
+                new_analysis = DetailPageAnalysis(
+                    user_id=user_id,
+                    session_uuid=valid_session_uuid,
+                    message_hash=message_hash,
+                    original_message=user_context,
+                    detected_intent="hscode_analysis",
+                    detected_hscode=hscode,
+                    confidence_score=0.9,  # HSCode가 확정된 경우 높은 신뢰도
+                    processing_time_ms=0,  # 백그라운드 작업이므로 0
+                    analysis_source="enhanced_ai_generation",
+                    analysis_metadata=enhanced_info.get("generation_metadata", {}),
+                    web_search_performed=True,
+                    web_search_results=None,
+                    # 상세 정보
+                    tariff_info=enhanced_info.get("tariff_info", {}),
+                    trade_agreement_info=enhanced_info.get("trade_agreement_info", {}),
+                    regulation_info=enhanced_info.get("regulation_info", {}),
+                    non_tariff_info=enhanced_info.get("non_tariff_info", {}),
+                    similar_hscodes_detailed=enhanced_info.get(
+                        "similar_hscodes_detailed", {}
+                    ),
+                    market_analysis=enhanced_info.get("market_analysis", {}),
+                    verification_status=enhanced_info.get(
+                        "verification_status", "ai_generated"
+                    ),
+                    data_quality_score=enhanced_info.get("data_quality_score", 0.0),
+                    needs_update=enhanced_info.get("needs_update", False),
+                    last_verified_at=datetime.utcnow(),
+                    expert_opinion=enhanced_info.get("expert_opinion"),
+                )
+
+                db.add(new_analysis)
+                await db.commit()
+                logger.info(f"HSCode {hscode}에 대한 상세 정보 저장 완료 (새 레코드)")
+
+    except Exception as e:
+        logger.error(f"상세 정보 생성 및 저장 중 오류: {e}", exc_info=True)
+
+
 class ChatService:
     """
     채팅 관련 비즈니스 로직을 처리하는 서비스.
@@ -236,6 +428,9 @@ class ChatService:
         self.intent_classification_service = (
             IntentClassificationService()
         )  # 고급 의도 분류 서비스 추가
+        self.enhanced_detail_generator = (
+            EnhancedDetailGenerator()
+        )  # 상세 정보 생성 서비스 추가
         # 병렬 처리 매니저 추가
         from app.services.parallel_task_manager import ParallelTaskManager
 

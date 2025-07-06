@@ -62,7 +62,6 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
         self.user_id = user_id
         # 외부에서 주입된, DB와 동기화된 세션 객체를 사용
         self.session_uuid = session.session_uuid
-        self._session_created_at = session.created_at
 
     @property
     def messages(self) -> List[BaseMessage]:
@@ -92,7 +91,6 @@ class PostgresChatMessageHistory(BaseChatMessageHistory):
         message_data = message_to_dict(message)
         message_create = schemas.ChatMessageCreate(
             session_uuid=self.session_uuid,
-            session_created_at=self._session_created_at,
             message_type=_langchain_type_to_db_type(message_data["type"]),
             content=message_data["data"]["content"],
         )

@@ -24,6 +24,7 @@ from sqlalchemy import (
     CheckConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, BIGINT, ARRAY
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy import func
 from pgvector.sqlalchemy import Vector
@@ -115,68 +116,96 @@ class TradeNews(Base):
 
 
 class ChatSession(Base):
-    """채팅 세션 테이블 모델 - 구현계획.md v6.2 기준"""
+    """채팅 세션 테이블 모델 - 방안1: 파티셔닝 제거, 단순화"""
 
     __tablename__ = "chat_sessions"
 
     session_uuid = Column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
-    created_at = Column(
-        DateTime(timezone=True), primary_key=True, server_default=func.now()
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=func.gen_random_uuid(),
+        comment="세션 UUID - 단일 기본키",
     )
     user_id = Column(
         BIGINT, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    session_title = Column(String(255))
-    message_count = Column(Integer, nullable=False, default=0)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+        comment="세션 생성 시간 - 인덱스로 성능 보장",
+    )
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    session_title = Column(String(255))
+    message_count = Column(Integer, nullable=False, default=0)
 
     user = relationship("User", back_populates="chat_sessions")
     messages = relationship(
         "ChatMessage",
         back_populates="session",
         cascade="all, delete-orphan",
-        primaryjoin="and_(ChatSession.session_uuid==foreign(ChatMessage.session_uuid), ChatSession.created_at==foreign(ChatMessage.session_created_at))",
+        primaryjoin="ChatSession.session_uuid==foreign(ChatMessage.session_uuid)",
+        foreign_keys="[ChatMessage.session_uuid]",
     )
 
-    __table_args__ = {
-        "postgresql_partition_by": "RANGE (created_at)",
-    }
+    __table_args__ = (
+        Index("idx_chat_sessions_user_id", "user_id"),
+        Index("idx_chat_sessions_created_at", desc("created_at")),
+        Index("idx_chat_sessions_user_created", "user_id", desc("created_at")),
+    )
 
 
 class ChatMessage(Base):
-    """채팅 메시지 테이블 모델 - 구현계획.md v6.2 기준"""
+    """채팅 메시지 테이블 모델 - 방안1: 파티셔닝 제거, 단순화"""
 
     __tablename__ = "chat_messages"
 
     message_id = Column(BIGINT, primary_key=True, autoincrement=True)
-    created_at = Column(
-        DateTime(timezone=True), primary_key=True, server_default=func.now()
+    session_uuid = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.session_uuid", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="세션 UUID - 단순화된 외래키",
     )
-    session_uuid = Column(UUID(as_uuid=True), nullable=False)
-    session_created_at = Column(DateTime(timezone=True), nullable=False)
     message_type = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     ai_model = Column(String(100))
     thinking_process = Column(Text)
     hscode_analysis = Column(JSONB)
     sse_bookmark_data = Column(JSONB)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+        comment="메시지 생성 시간",
+    )
 
     session = relationship("ChatSession", back_populates="messages")
 
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["session_uuid", "session_created_at"],
-            ["chat_sessions.session_uuid", "chat_sessions.created_at"],
-            ondelete="CASCADE",
-        ),
         CheckConstraint(
             "message_type IN ('USER', 'AI')", name="chat_messages_message_type_check"
         ),
-        {"postgresql_partition_by": "RANGE (created_at)"},
+        Index("idx_chat_messages_session_uuid", "session_uuid"),
+        Index("idx_chat_messages_created_at", desc("created_at")),
+        Index("idx_chat_messages_message_type", "message_type"),
+        Index(
+            "idx_chat_messages_hscode_analysis",
+            "hscode_analysis",
+            postgresql_using="gin",
+            postgresql_where=text("hscode_analysis IS NOT NULL"),
+        ),
+        Index(
+            "idx_chat_messages_sse_bookmark",
+            "sse_bookmark_data",
+            postgresql_using="gin",
+            postgresql_where=text("sse_bookmark_data IS NOT NULL"),
+        ),
     )
 
 
@@ -398,14 +427,19 @@ class DocumentV2(Base):
 
 
 class DetailPageAnalysis(Base):
-    """상세페이지 분석 결과 테이블 모델"""
+    """상세페이지 분석 결과 테이블 모델 - 방안1: 단순화된 외래키"""
 
     __tablename__ = "detail_page_analyses"
 
     id = Column(BIGINT, primary_key=True, autoincrement=True)
     user_id = Column(BIGINT, ForeignKey("users.id", ondelete="SET NULL"), index=True)
-    session_uuid = Column(UUID(as_uuid=True), index=True)
-    session_created_at = Column(DateTime(timezone=True))
+    session_uuid = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.session_uuid", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+        comment="채팅 세션 UUID - 단순화된 외래키",
+    )
     message_hash = Column(String(64), nullable=False, index=True)
     original_message = Column(Text, nullable=False)
     detected_intent = Column(String(50), nullable=False, index=True)
@@ -416,6 +450,20 @@ class DetailPageAnalysis(Base):
     analysis_metadata = Column(JSONB, nullable=False, server_default="{}")
     web_search_performed = Column(Boolean, nullable=False, default=False)
     web_search_results = Column(JSONB)
+
+    # 상세 정보 컬럼들 추가
+    tariff_info = Column(JSONB, server_default="{}")
+    trade_agreement_info = Column(JSONB, server_default="{}")
+    regulation_info = Column(JSONB, server_default="{}")
+    non_tariff_info = Column(JSONB, server_default="{}")
+    similar_hscodes_detailed = Column(JSONB, server_default="{}")
+    market_analysis = Column(JSONB, server_default="{}")
+    verification_status = Column(String(50), server_default="pending")
+    expert_opinion = Column(Text)
+    needs_update = Column(Boolean, server_default="FALSE")
+    last_verified_at = Column(DateTime(timezone=True))
+    data_quality_score = Column(Float, server_default="0.0")
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -428,11 +476,6 @@ class DetailPageAnalysis(Base):
     )
 
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["session_uuid", "session_created_at"],
-            ["chat_sessions.session_uuid", "chat_sessions.created_at"],
-            ondelete="SET NULL",
-        ),
         Index("idx_detail_page_analyses_user_session", "user_id", "session_uuid"),
         Index("idx_detail_page_analyses_message_hash", "message_hash"),
         Index(
@@ -448,6 +491,42 @@ class DetailPageAnalysis(Base):
         Index(
             "idx_detail_page_analyses_metadata",
             "analysis_metadata",
+            postgresql_using="gin",
+        ),
+        # 새로운 인덱스들 추가
+        Index(
+            "idx_detail_page_analyses_verification_status",
+            "verification_status",
+            postgresql_where=text("verification_status != 'pending'"),
+        ),
+        Index(
+            "idx_detail_page_analyses_needs_update",
+            "needs_update",
+            postgresql_where=text("needs_update = TRUE"),
+        ),
+        Index(
+            "idx_detail_page_analyses_data_quality",
+            "data_quality_score",
+            postgresql_where=text("data_quality_score >= 0.8"),
+        ),
+        Index(
+            "idx_detail_page_analyses_tariff_info",
+            "tariff_info",
+            postgresql_using="gin",
+        ),
+        Index(
+            "idx_detail_page_analyses_regulation_info",
+            "regulation_info",
+            postgresql_using="gin",
+        ),
+        Index(
+            "idx_detail_page_analyses_non_tariff_info",
+            "non_tariff_info",
+            postgresql_using="gin",
+        ),
+        Index(
+            "idx_detail_page_analyses_market_analysis",
+            "market_analysis",
             postgresql_using="gin",
         ),
     )

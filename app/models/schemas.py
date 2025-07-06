@@ -361,7 +361,6 @@ class ChatMessageCreate(ChatMessageBase):
     """채팅 메시지 생성용 스키마"""
 
     session_uuid: UUID
-    session_created_at: datetime
 
 
 class ChatMessage(ChatMessageBase):
@@ -370,7 +369,6 @@ class ChatMessage(ChatMessageBase):
     message_id: int
     created_at: datetime
     session_uuid: UUID
-    session_created_at: datetime
 
     class Config:
         from_attributes = True
@@ -431,21 +429,10 @@ class DetailPageInfo(BaseModel):
     detail_buttons: List[DetailButton] = Field(default_factory=list)
     processing_time_ms: int = Field(default=0)
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    analysis_source: Literal["context7", "fallback", "cache"] = Field(
+    analysis_source: Literal["fallback", "cache", "web_search"] = Field(
         default="fallback"
     )
-    context7_metadata: Optional[Dict[str, Any]] = Field(
-        default=None, description="Context7 분석 메타데이터"
-    )
 
 
-class Context7AnalysisResult(BaseModel):
-    """Context7 분석 결과"""
-
-    hscode_patterns: List[str] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    library_docs_used: List[str] = Field(default_factory=list)
-    total_tokens: int = Field(default=0)
-    api_calls: int = Field(default=0)
-    processing_time_ms: int = Field(default=0)
-    success: bool = Field(default=False)
+# Context7은 AI 어시스턴트 도구이므로 실제 애플리케이션에서는 사용하지 않음
+# class Context7AnalysisResult는 제거

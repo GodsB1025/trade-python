@@ -27,9 +27,9 @@ class SSEEventGenerator:
             "estimatedPreparationTime": 5000,
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "processingInfo": {
-                "context7_enabled": True,
                 "fallback_available": True,
                 "cache_checked": True,
+                "web_search_enabled": True,
             },
         }
         return f"event: detail_buttons_start\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -78,22 +78,13 @@ class SSEEventGenerator:
                 "hscode_detected": detail_info.hscode,
                 "confidence_score": detail_info.confidence_score,
                 "analysis_source": detail_info.analysis_source,
-                "fallback_used": detail_info.analysis_source != "context7",
+                "fallback_used": detail_info.analysis_source == "fallback",
                 "cache_hit": detail_info.analysis_source == "cache",
+                "web_search_used": detail_info.analysis_source == "web_search",
             },
             "performance": {
-                "context7_calls": (
-                    detail_info.context7_metadata.get("api_calls", 0)
-                    if detail_info.context7_metadata
-                    else 0
-                ),
-                "context7_latency_ms": (
-                    detail_info.processing_time_ms
-                    if detail_info.analysis_source == "context7"
-                    else 0
-                ),
-                "database_queries": 0,  # 현재는 사용하지 않음
                 "total_processing_time": detail_info.processing_time_ms,
+                "database_queries": 0,  # 현재는 사용하지 않음
             },
         }
         yield f"event: detail_buttons_complete\ndata: {json.dumps(complete_data, ensure_ascii=False)}\n\n"
