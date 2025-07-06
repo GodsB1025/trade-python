@@ -167,7 +167,8 @@ class ChatService:
         user_id = chat_request.user_id
         session_uuid_str = chat_request.session_uuid
 
-        chain = self.llm_service.chat_chain
+        # 직접 ChatAnthropic 모델 사용 (chain 대신)
+        chat_model = llm_provider.news_chat_model
         history = None
         session_obj = None
         current_session_uuid = None
@@ -221,7 +222,7 @@ class ChatService:
                     # 새로 생성되었거나 기존의 세션 UUID를 가져옴
                     current_session_uuid = str(session_obj.session_uuid)
 
-                    # 이전 대화 내역을 가져와서 체인의 입력에 포함
+                    # 이전 대화 내역을 가져와서 모델 입력에 포함
                     try:
                         previous_messages = await history.aget_messages()
                     except Exception as history_error:
@@ -301,48 +302,61 @@ class ChatService:
             }
             yield f"event: content_block_start\ndata: {json.dumps(content_block_event)}\n\n"
 
-            # 체인 실행 및 스트리밍
-            final_output = None
+            # 무역 전문가 시스템 프롬프트 추가
+            system_prompt = (
+                "당신은 대한민국의 무역 및 수출입 전문가입니다. 다음 지침을 엄격히 준수하세요:\n\n"
+                "1. **무역 관련 질문만 답변**: 무역, 수출입, 관세, 통관, 원산지, FTA, 무역규제, 품목분류, HSCode 등과 관련된 질문에만 답변합니다.\n\n"
+                "2. **무역 외 질문 거부**: 무역과 관련이 없는 질문(일반상식, 개인적 조언, 오락, 요리, 여행 등)에 대해서는 다음과 같이 정중히 거부합니다:\n"
+                "   '죄송하지만 저는 무역 및 수출입 전문 AI입니다. 무역, 관세, 통관, 수출입 규제 등과 관련된 질문만 답변할 수 있습니다. 무역 관련 질문이 있으시면 언제든지 문의해 주세요.'\n\n"
+                "3. **전문적 답변**: 무역 관련 질문에 대해서는 정확하고 전문적인 정보를 제공하며, 최신 규정과 정책 변화를 반영합니다.\n\n"
+                "4. **한국어 답변**: 모든 답변은 한국어로 제공합니다.\n\n"
+                "5. **안전성**: 불법적이거나 유해한 무역 행위에 대해서는 조언하지 않습니다."
+            )
+
+            # 메시지 구성
+            messages = []
+
+            # 시스템 프롬프트 추가
+            from langchain_core.messages import SystemMessage
+
+            messages.append(SystemMessage(content=system_prompt))
+
+            # 이전 대화 내역 추가 (있는 경우)
+            if previous_messages:
+                messages.extend(previous_messages)
+
+            # 현재 사용자 메시지 추가
+            messages.append(HumanMessage(content=chat_request.message))
+
+            # 직접 ChatAnthropic 모델로 스트리밍 - 한 글자씩 스트리밍됨
             ai_response = ""
 
-            # 1. 체인 스트리밍 실행
-            input_data: Dict[str, Any] = {"question": chat_request.message}
-
-            # 이전 대화 내역이 있으면 추가 (BaseMessage 객체들을 그대로 전달)
-            if history and previous_messages:
-                # BaseMessage 객체들을 리스트로 그대로 전달
-                input_data["chat_history"] = previous_messages
-            else:
-                # 대화 내역이 없으면 빈 리스트 전달
-                input_data["chat_history"] = []
-
             try:
-                # langchain의 astream 메서드를 올바르게 사용
-                async for chunk in chain.astream(input_data):
-                    final_output = chunk
-                    # chunk가 dict이고 'answer' 키를 가진 경우
-                    if isinstance(chunk, dict) and "answer" in chunk:
-                        answer_chunk = chunk["answer"]
-                    # chunk가 문자열인 경우
-                    elif isinstance(chunk, str):
-                        answer_chunk = chunk
-                    else:
-                        continue
+                # langchain의 astream 메서드를 사용하여 토큰별 스트리밍
+                async for chunk in chat_model.astream(messages):
+                    # chunk.content가 문자열인 경우 직접 사용
+                    if hasattr(chunk, "content") and chunk.content:
+                        chunk_text = ""
+                        if isinstance(chunk.content, str):
+                            chunk_text = chunk.content
+                        elif isinstance(chunk.content, list) and chunk.content:
+                            # content가 list인 경우 첫 번째 요소 사용
+                            chunk_text = str(chunk.content[0])
 
-                    if answer_chunk:
-                        ai_response += answer_chunk
+                        if chunk_text:
+                            ai_response += chunk_text
 
-                        # content_block_delta 이벤트로 텍스트 전송
-                        delta_event = {
-                            "type": "content_block_delta",
-                            "index": content_index,
-                            "delta": {"type": "text_delta", "text": answer_chunk},
-                        }
-                        yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n"
+                            # content_block_delta 이벤트로 텍스트 전송
+                            delta_event = {
+                                "type": "content_block_delta",
+                                "index": content_index,
+                                "delta": {"type": "text_delta", "text": chunk_text},
+                            }
+                            yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n"
 
             except Exception as stream_error:
                 logger.error(
-                    f"체인 스트리밍 중 오류 발생: {stream_error}", exc_info=True
+                    f"모델 스트리밍 중 오류 발생: {stream_error}", exc_info=True
                 )
                 # 에러 발생 시 에러 메시지를 delta로 전송
                 error_text = "AI 응답 생성 중 오류가 발생했습니다."
@@ -401,28 +415,6 @@ class ChatService:
                         )
                         await title_savepoint.rollback()
                         # 제목 생성 실패해도 응답은 계속 진행
-
-            # 4. RAG-웹 검색 폴백 시 백그라운드 작업 추가
-            if (
-                isinstance(final_output, dict)
-                and final_output.get("source") == "rag_or_web"
-            ):
-                source_docs = final_output.get("docs", [])
-                if source_docs and not any(
-                    doc.metadata.get("source") == "db" for doc in source_docs
-                ):
-                    hscode_match = re.search(
-                        r"\b(\d{4}\.\d{2}|\d{6}|\d{10})\b", chat_request.message
-                    )
-                    hscode_value = hscode_match.group(0) if hscode_match else "N/A"
-                    logger.info(
-                        "RAG-웹 검색 폴백이 발생하여, 결과 저장을 위한 백그라운드 작업을 예약합니다."
-                    )
-                    background_tasks.add_task(
-                        _save_rag_document_from_web_search_task,
-                        source_docs,
-                        hscode_value,
-                    )
 
             # 최종 커밋 (모든 세이브포인트가 성공한 경우에만)
             try:

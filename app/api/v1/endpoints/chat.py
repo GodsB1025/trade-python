@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
+import json
 import logging
 from typing import AsyncGenerator
 
@@ -35,7 +36,9 @@ async def handle_chat(
         - `message`: 사용자 메시지
     - **응답:**
         - `StreamingResponse`: `text/event-stream` 형식의 SSE 스트림.
+        - 초기 응답에 session_uuid 포함
         - Anthropic Claude API 형식의 이벤트:
+          - `event: session_info`: 세션 정보 (session_uuid 포함)
           - `event: message_start`: 메시지 시작
           - `event: content_block_start`: 컨텐츠 블록 시작
           - `event: content_block_delta`: 스트리밍 텍스트 청크
@@ -58,11 +61,31 @@ async def handle_chat(
         SSE 형식의 스트림을 생성하는 비동기 제너레이터.
         클라이언트 연결 해제를 감지하고 적절한 에러 처리를 수행함.
         """
+        accumulated_response = ""  # 응답 내용 누적용
+        response_started = False
+
         try:
             # 클라이언트 연결 상태 확인
             if await request.is_disconnected():
                 logger.info("클라이언트가 연결을 해제했습니다.")
                 return
+
+            # 초기 이벤트: session_uuid 전송
+            if chat_request.session_uuid:
+                session_info = {
+                    "session_uuid": chat_request.session_uuid,
+                    "timestamp": asyncio.get_event_loop().time(),
+                }
+                session_info_json = json.dumps(session_info, ensure_ascii=False)
+                yield f"event: session_info\ndata: {session_info_json}\n\n"
+
+                # 백프레셔 방지를 위한 짧은 대기
+                await asyncio.sleep(0.001)
+
+                # 연결 상태 재확인
+                if await request.is_disconnected():
+                    logger.info("세션 정보 전송 후 클라이언트가 연결을 해제했습니다.")
+                    return
 
             # ChatService의 스트림을 그대로 전달 (HSCode 쿼리도 내부에서 처리)
             async for chunk in chat_service.stream_chat_response(
@@ -73,16 +96,56 @@ async def handle_chat(
                     logger.info("스트리밍 중 클라이언트가 연결을 해제했습니다.")
                     break
 
+                # 응답 시작 로깅 (최초 1회만)
+                if not response_started:
+                    logger.info(f"=== AI 응답 시작 ===")
+                    logger.info(f"사용자 ID: {chat_request.user_id}")
+                    logger.info(f"세션 UUID: {chat_request.session_uuid}")
+                    response_started = True
+
+                # 실제 응답 내용 추출 및 누적
+                try:
+                    # SSE 형식에서 data 부분 추출
+                    if chunk.startswith("event: content_block_delta\ndata: "):
+                        data_part = chunk.split("data: ", 1)[1].split("\n\n")[0]
+                        delta_data = json.loads(data_part)
+
+                        # delta에서 실제 텍스트 추출
+                        if "delta" in delta_data and "text" in delta_data["delta"]:
+                            text_content = delta_data["delta"]["text"]
+                            accumulated_response += text_content
+
+                except (json.JSONDecodeError, KeyError, IndexError):
+                    # JSON 파싱 실패하거나 예상된 구조가 아닌 경우는 무시
+                    pass
+
                 # SSE 형식으로 청크 전송
                 yield chunk
 
                 # 백프레셔 방지를 위한 짧은 대기
                 await asyncio.sleep(0.001)
 
+            # 응답 완료 로깅
+            if response_started:
+                logger.info(f"=== AI 응답 완료 ===")
+                logger.info(f"사용자 ID: {chat_request.user_id}")
+                logger.info(f"세션 UUID: {chat_request.session_uuid}")
+                logger.info(f"응답 길이: {len(accumulated_response)}")
+                logger.info(
+                    f"응답 내용: {accumulated_response[:500]}..."
+                )  # 처음 500자만 로깅
+                logger.info(f"====================")
+
         except asyncio.CancelledError:
             logger.info("스트리밍이 취소되었습니다.")
+            if response_started and accumulated_response:
+                logger.info(f"취소된 응답 내용 (일부): {accumulated_response[:200]}...")
         except Exception as e:
             logger.error(f"스트리밍 중 예외 발생: {e}", exc_info=True)
+            if response_started and accumulated_response:
+                logger.info(
+                    f"예외 발생 전 응답 내용 (일부): {accumulated_response[:200]}..."
+                )
 
     # SSE 스트리밍 응답 생성
     response = StreamingResponse(
