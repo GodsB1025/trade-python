@@ -320,8 +320,8 @@ def extract_text_content_safely(content: Any) -> str:
                 ) and not item_str.startswith("EoYJCk"):
                     text_parts.append(item_str)
 
-        # 모든 텍스트 부분을 결합
-        result = " ".join(text_parts).strip()
+        # 모든 텍스트 부분을 결합 (줄바꿈 보존을 위해 공백 없이 연결)
+        result = "".join(text_parts).strip()
 
         # 결과가 비어있다면 첫 번째 요소 처리 (하위 호환성)
         if not result and content:

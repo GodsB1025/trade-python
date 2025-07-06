@@ -38,6 +38,69 @@ from app.core.llm_provider import llm_provider
 logger = logging.getLogger(__name__)
 
 
+def _is_web_search_result_text(text: str) -> bool:
+    """텍스트가 웹 검색 결과인지 확인하는 함수"""
+    if not text.strip():
+        return False
+
+    # JSON 배열 패턴 확인
+    if not (text.strip().startswith("[") and text.strip().endswith("]")):
+        return False
+
+    try:
+        # JSON 파싱 시도
+        data = json.loads(text.strip())
+
+        # 빈 배열은 웹 검색 결과가 아님
+        if isinstance(data, list) and len(data) == 0:
+            return False
+
+        if isinstance(data, list) and len(data) > 0:
+            # 첫 번째 항목이 웹 검색 결과 형태인지 확인
+            first_item = data[0]
+            if isinstance(first_item, dict):
+                # 웹 검색 결과의 필수 키들 확인
+                required_keys = {"url", "title", "type"}
+                has_encrypted_content = "encrypted_content" in first_item
+                has_content = "content" in first_item
+                has_required_keys = required_keys.issubset(first_item.keys())
+
+                return has_required_keys and (has_encrypted_content or has_content)
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return False
+
+    return False
+
+
+def _parse_web_search_results(text: str) -> List[Dict[str, Any]]:
+    """웹 검색 결과 텍스트를 파싱하여 구조화된 데이터로 변환"""
+    try:
+        data = json.loads(text.strip())
+        if isinstance(data, list):
+            processed_results = []
+            for item in data:
+                if isinstance(item, dict):
+                    # 표준화된 웹 검색 결과 형태로 변환
+                    processed_item = {
+                        "type": item.get("type", "web_search_result"),
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "content": item.get("encrypted_content")
+                        or item.get("content", ""),
+                        "page_age": item.get("page_age"),
+                        "metadata": {
+                            "source": "anthropic_web_search",
+                            "confidence": 0.8,  # 기본 신뢰도
+                        },
+                    }
+                    processed_results.append(processed_item)
+            return processed_results
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.warning(f"웹 검색 결과 파싱 실패: {e}")
+
+    return []
+
+
 async def generate_session_title(user_message: str, ai_response: str) -> str:
     """
     사용자의 첫 번째 메시지와 AI 응답을 바탕으로 세션 제목을 자동 생성
@@ -818,6 +881,8 @@ HSCode 분류의 근본 원칙:
 
             # 직접 ChatAnthropic 모델로 스트리밍 - 한 글자씩 스트리밍됨
             ai_response = ""
+            accumulated_chunk = ""  # 웹 검색 결과 감지를 위한 청크 누적
+            web_search_results_sent = False  # 웹 검색 결과 전송 여부 추적
 
             try:
                 # langchain의 astream 메서드를 사용하여 토큰별 스트리밍
@@ -828,15 +893,57 @@ HSCode 분류의 근본 원칙:
                     chunk_text = extract_text_from_stream_chunk(chunk)
 
                     if chunk_text:
-                        ai_response += chunk_text
+                        # 청크 누적
+                        accumulated_chunk += chunk_text
 
-                        # content_block_delta 이벤트로 텍스트 전송
-                        delta_event = {
-                            "type": "content_block_delta",
-                            "index": content_index,
-                            "delta": {"type": "text_delta", "text": chunk_text},
-                        }
-                        yield f"event: chat_content_delta\ndata: {json.dumps(delta_event)}\n\n"
+                        # 웹 검색 결과인지 확인
+                        if _is_web_search_result_text(accumulated_chunk):
+                            # 웹 검색 결과 파싱
+                            web_search_results = _parse_web_search_results(
+                                accumulated_chunk
+                            )
+
+                            if web_search_results and not web_search_results_sent:
+                                logger.info(
+                                    f"웹 검색 결과 감지됨: {len(web_search_results)}개 결과"
+                                )
+
+                                # 웹 검색 결과를 별도 이벤트로 전송
+                                web_search_event = {
+                                    "type": "web_search_results",
+                                    "results": web_search_results,
+                                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                                    "total_count": len(web_search_results),
+                                }
+                                yield f"event: chat_web_search_results\ndata: {json.dumps(web_search_event)}\n\n"
+
+                                web_search_results_sent = True
+
+                            # 웹 검색 결과는 메인 텍스트에서 제외하고 스킵
+                            continue
+
+                        # 빈 배열 "[]" 스킵
+                        if chunk_text.strip() == "[]":
+                            logger.debug("빈 배열 청크 감지, 스킵함")
+                            continue
+
+                        # 웹 검색 결과가 아닌 일반 텍스트만 누적
+                        if not _is_web_search_result_text(accumulated_chunk):
+                            ai_response += chunk_text
+
+                            # content_block_delta 이벤트로 텍스트 전송
+                            delta_event = {
+                                "type": "content_block_delta",
+                                "index": content_index,
+                                "delta": {"type": "text_delta", "text": chunk_text},
+                            }
+                            yield f"event: chat_content_delta\ndata: {json.dumps(delta_event)}\n\n"
+
+                        # 누적된 청크가 너무 크면 일부 제거 (메모리 효율성)
+                        if len(accumulated_chunk) > 50000:  # 50KB 제한
+                            accumulated_chunk = accumulated_chunk[
+                                -25000:
+                            ]  # 뒤쪽 25KB만 유지
 
             except Exception as stream_error:
                 logger.error(
