@@ -129,13 +129,15 @@ class ChatRequest(BaseModel):
     """
     /api/v1/chat 엔드포인트에 대한 요청 스키마.
     구현계획.md vFinal 및 chat_endpoint_implementation_plan.md v1.0 기준.
+    Java에서 생성한 session_uuid를 필수로 받음.
     """
 
     user_id: Optional[int] = Field(
         None, description="회원 ID. 없으면 비회원으로 간주함."
     )
-    session_uuid: Optional[str] = Field(
-        None, description="기존 채팅 세션의 UUID. 새 채팅 시작 시에는 null."
+    session_uuid: str = Field(
+        ...,
+        description="Java에서 생성한 채팅 세션의 UUID. 새 채팅 시작 시에도 Java에서 생성해서 전송함.",
     )
     message: str = Field(
         ..., min_length=1, max_length=5000, description="사용자의 질문 메시지"

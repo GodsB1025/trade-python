@@ -187,13 +187,35 @@ class ChatService:
                 # 세션 관련 트랜잭션을 세이브포인트로 관리
                 async with db.begin_nested() as session_savepoint:
                     try:
-                        # 1. 비동기 CRUD 함수를 사용하여 세션을 먼저 가져오거나 생성
+                        # 1. 기존 세션 조회를 위한 사전 확인
+                        existing_session = None
+                        from uuid import UUID
+                        from sqlalchemy.future import select
+                        from sqlalchemy.orm import selectinload
+                        from app.models import db_models
+
+                        try:
+                            session_uuid = UUID(session_uuid_str)
+                            query = (
+                                select(db_models.ChatSession)
+                                .where(
+                                    db_models.ChatSession.session_uuid == session_uuid,
+                                    db_models.ChatSession.user_id == user_id,
+                                )
+                                .options(selectinload(db_models.ChatSession.messages))
+                            )
+                            result = await db.execute(query)
+                            existing_session = result.scalars().first()
+                        except ValueError:
+                            pass
+
+                        # 2. 세션 생성/조회
                         session_obj = await crud.chat.get_or_create_session(
                             db=db, user_id=user_id, session_uuid_str=session_uuid_str
                         )
 
-                        # 새 세션인지 확인 (session_uuid_str이 없었던 경우)
-                        is_new_session = not session_uuid_str
+                        # 새 세션인지 확인 (기존 세션이 없었던 경우)
+                        is_new_session = existing_session is None
 
                         # 세션 생성 후 즉시 플러시하여 세이브포인트에 반영
                         await db.flush()

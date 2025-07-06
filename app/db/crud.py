@@ -183,39 +183,72 @@ class CRUDChat:
     ) -> db_models.ChatSession:
         """
         주어진 session_uuid로 채팅 세션을 찾거나, 없으면 새로 생성.
-        - session_uuid_str (str): Pydantic 모델에서 받은 문자열 UUID.
+        Java에서 생성한 session_uuid를 그대로 사용함.
+        트랜잭션 충돌 상황도 처리함.
+        - session_uuid_str (str): Java에서 받은 문자열 UUID.
         """
-        session_to_load = None
-        if session_uuid_str:
-            try:
-                session_uuid = UUID(session_uuid_str)
-                # messages 관계를 즉시 로딩(eager loading)하도록 수정
-                query = (
-                    select(db_models.ChatSession)
-                    .where(
-                        db_models.ChatSession.session_uuid == session_uuid,
-                        db_models.ChatSession.user_id == user_id,
-                    )
-                    .options(selectinload(db_models.ChatSession.messages))
-                )
-                result = await db.execute(query)
-                session_to_load = result.scalars().first()
-            except ValueError:
-                # 유효하지 않은 UUID 형식의 문자열일 경우, 무시하고 새 세션을 생성
-                pass
+        from sqlalchemy.exc import IntegrityError
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if not session_uuid_str:
+            raise ValueError(
+                "session_uuid는 필수입니다. Java에서 생성한 session_uuid를 제공해야 합니다."
+            )
+
+        try:
+            session_uuid = UUID(session_uuid_str)
+        except ValueError:
+            raise ValueError(f"유효하지 않은 UUID 형식입니다: {session_uuid_str}")
+
+        # 기존 세션이 있는지 확인
+        query = (
+            select(db_models.ChatSession)
+            .where(
+                db_models.ChatSession.session_uuid == session_uuid,
+                db_models.ChatSession.user_id == user_id,
+            )
+            .options(selectinload(db_models.ChatSession.messages))
+        )
+        result = await db.execute(query)
+        session_to_load = result.scalars().first()
 
         if session_to_load:
             return session_to_load
 
-        # 세션이 없거나, UUID가 유효하지 않거나, 제공되지 않은 경우 새로 생성
-        new_session = db_models.ChatSession(user_id=user_id)
+        # 세션이 없으면 Java에서 받은 UUID로 새 세션 생성
+        new_session = db_models.ChatSession(session_uuid=session_uuid, user_id=user_id)
         db.add(new_session)
-        await db.flush()
-        await db.refresh(new_session)
-        # `new_session.messages = []` 라인 제거:
-        # 새 객체의 관계(relationship)는 기본적으로 비어 있으며,
-        # 이 코드는 불필요한 동기적 Lazy-loading을 유발하여 MissingGreenlet 오류의 원인이 됨.
-        return new_session
+
+        try:
+            await db.flush()
+            await db.refresh(new_session)
+            return new_session
+        except IntegrityError as e:
+            # UUID 충돌 등의 예외 발생 시 세션 조회 재시도
+            # (Java에서 같은 UUID로 세션을 생성하고 커밋했을 가능성)
+            logger.warning(
+                f"세션 생성 중 IntegrityError 발생: {session_uuid}. Java에서 이미 생성했을 가능성으로 재조회 시도."
+            )
+
+            # 세션에서 추가한 객체 제거
+            db.expunge(new_session)
+
+            # 다시 한번 기존 세션 조회 시도
+            result = await db.execute(query)
+            session_to_load = result.scalars().first()
+
+            if session_to_load:
+                logger.info(f"재조회 성공: 기존 세션 반환 {session_uuid}")
+                return session_to_load
+            else:
+                logger.error(f"재조회 실패: 세션이 여전히 존재하지 않음 {session_uuid}")
+                raise e
+        except Exception as e:
+            # IntegrityError가 아닌 다른 예외는 그대로 발생
+            logger.error(f"세션 생성 중 예기치 않은 오류: {e}")
+            raise e
 
     async def get_messages_by_session(
         self, db: AsyncSession, session_uuid: UUID

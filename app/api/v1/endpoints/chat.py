@@ -71,21 +71,20 @@ async def handle_chat(
                 return
 
             # 초기 이벤트: session_uuid 전송
-            if chat_request.session_uuid:
-                session_info = {
-                    "session_uuid": chat_request.session_uuid,
-                    "timestamp": asyncio.get_event_loop().time(),
-                }
-                session_info_json = json.dumps(session_info, ensure_ascii=False)
-                yield f"event: session_info\ndata: {session_info_json}\n\n"
+            session_info = {
+                "session_uuid": chat_request.session_uuid,
+                "timestamp": asyncio.get_event_loop().time(),
+            }
+            session_info_json = json.dumps(session_info, ensure_ascii=False)
+            yield f"event: session_info\ndata: {session_info_json}\n\n"
 
-                # 백프레셔 방지를 위한 짧은 대기
-                await asyncio.sleep(0.001)
+            # 백프레셔 방지를 위한 짧은 대기
+            await asyncio.sleep(0.001)
 
-                # 연결 상태 재확인
-                if await request.is_disconnected():
-                    logger.info("세션 정보 전송 후 클라이언트가 연결을 해제했습니다.")
-                    return
+            # 연결 상태 재확인
+            if await request.is_disconnected():
+                logger.info("세션 정보 전송 후 클라이언트가 연결을 해제했습니다.")
+                return
 
             # ChatService의 스트림을 그대로 전달 (HSCode 쿼리도 내부에서 처리)
             async for chunk in chat_service.stream_chat_response(
