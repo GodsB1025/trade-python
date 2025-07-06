@@ -1,11 +1,13 @@
 import logging
 import json
 import re
-from typing import AsyncGenerator, Dict, Any, List, cast
+import time  # 추가
+from typing import AsyncGenerator, Dict, Any, List, cast, Union  # Union 추가
 import uuid
 from datetime import datetime
 
 from fastapi import BackgroundTasks
+from fastapi.responses import JSONResponse  # 추가
 from langchain_core.documents import Document
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_anthropic import ChatAnthropic
@@ -14,9 +16,14 @@ from pydantic import SecretStr
 
 from app.db import crud
 from app.db.session import SessionLocal, get_db
-from app.models.chat_models import ChatRequest
+from app.models.chat_models import (
+    ChatRequest,
+    CargoTrackingResponse,
+    CargoTrackingError,
+)  # 추가
 from app.services.chat_history_service import PostgresChatMessageHistory
 from app.services.langchain_service import LLMService
+from app.services.cargo_tracking_service import CargoTrackingService  # 추가
 from app.core.config import settings
 from app.core.llm_provider import llm_provider
 
@@ -152,6 +159,69 @@ class ChatService:
 
     def __init__(self, llm_service: LLMService):
         self.llm_service = llm_service
+        self.cargo_tracking_service = (
+            CargoTrackingService()
+        )  # 화물통관 조회 서비스 추가
+
+    async def check_cargo_tracking_intent(
+        self, chat_request: ChatRequest
+    ) -> Union[Dict[str, Any], None]:
+        """
+        화물통관 조회 의도를 확인하고 처리함.
+
+        Returns:
+            화물통관 조회 응답 딕셔너리 또는 None (일반 채팅 처리 필요)
+        """
+        start_time = time.time()
+
+        try:
+            is_cargo_tracking, confidence = (
+                await self.cargo_tracking_service.detect_cargo_tracking_intent(
+                    chat_request.message
+                )
+            )
+
+            if is_cargo_tracking:
+                logger.info(f"화물통관 조회 감지됨: 신뢰도 {confidence:.3f}")
+
+                # 화물 정보 추출
+                cargo_data = (
+                    await self.cargo_tracking_service.extract_cargo_information(
+                        chat_request.message
+                    )
+                )
+
+                processing_time_ms = int((time.time() - start_time) * 1000)
+
+                if cargo_data:
+                    # 성공 응답 생성
+                    response = (
+                        await self.cargo_tracking_service.create_success_response(
+                            cargo_data=cargo_data,
+                            session_uuid=chat_request.session_uuid,
+                            user_id=chat_request.user_id,
+                            processing_time_ms=processing_time_ms,
+                        )
+                    )
+                    return response.model_dump()
+                else:
+                    # 화물번호 추출 실패
+                    error_response = (
+                        await self.cargo_tracking_service.create_error_response(
+                            error_code="CARGO_NUMBER_NOT_FOUND",
+                            error_message="메시지에서 화물번호를 찾을 수 없습니다.",
+                            original_message=chat_request.message,
+                            session_uuid=chat_request.session_uuid,
+                            user_id=chat_request.user_id,
+                        )
+                    )
+                    return error_response.model_dump()
+
+            return None  # 일반 채팅으로 처리
+
+        except Exception as cargo_error:
+            logger.error(f"화물통관 조회 처리 중 오류: {cargo_error}", exc_info=True)
+            return None  # 에러 발생 시 일반 채팅으로 폴백
 
     async def stream_chat_response(
         self,

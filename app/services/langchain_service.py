@@ -48,7 +48,7 @@ class QuestionClassification(BaseModel):
     is_trade_related: bool = Field(description="무역 관련 질문 여부")
     confidence: float = Field(description="분류 신뢰도 (0.0-1.0)")
     category: str = Field(
-        description="질문 카테고리: 'hscode', 'trade_general', 'non_trade'"
+        description="질문 카테고리: 'hscode', 'trade_general', 'cargo_tracking', 'non_trade'"
     )
     reasoning: str = Field(description="분류 근거")
 
@@ -105,6 +105,7 @@ class LLMService:
 **카테고리 정의:**
 - "hscode": HSCode 번호가 포함된 질문 (예: 8471.30, 6109.10 등)
 - "trade_general": 무역 관련이지만 HSCode가 없는 일반 질문
+- "cargo_tracking": 화물통관 조회 관련 질문 (화물번호, 통관조회, 배송추적 등)
 - "non_trade": 무역과 무관한 질문 (일반상식, 개인조언, 오락, 요리, 여행 등)
 
 **신뢰도 기준:**
@@ -170,6 +171,37 @@ class LLMService:
                 category="hscode",
                 reasoning="HSCode 패턴 감지됨",
             )
+
+        # 화물통관 조회 키워드 확인 (무역 키워드보다 먼저 체크)
+        cargo_tracking_keywords = [
+            "화물",
+            "통관조회",
+            "조회",
+            "추적",
+            "운송",
+            "배송",
+            "컨테이너",
+            "선적",
+            "화물번호",
+            "추적번호",
+            "운송장번호",
+            "선적번호",
+            "bl",
+            "awb",
+            "tracking",
+            "cargo",
+            "shipment",
+            "container",
+        ]
+
+        for keyword in cargo_tracking_keywords:
+            if keyword in question_lower:
+                return QuestionClassification(
+                    is_trade_related=True,
+                    confidence=0.8,
+                    category="cargo_tracking",
+                    reasoning=f"화물통관 조회 키워드 '{keyword}' 감지됨",
+                )
 
         # 기본 무역 키워드 확인
         basic_trade_keywords = [
@@ -283,6 +315,8 @@ class LLMService:
                 return {**input_dict, "route": "hscode"}
             elif classification.category == "trade_general":
                 return {**input_dict, "route": "trade_general"}
+            elif classification.category == "cargo_tracking":
+                return {**input_dict, "route": "cargo_tracking"}
             else:
                 return {**input_dict, "route": "non_trade"}
 
@@ -354,6 +388,15 @@ class LLMService:
                 return hscode_chain.invoke(input_dict)
             elif route == "trade_general":
                 return general_chain.invoke(input_dict)
+            elif route == "cargo_tracking":
+                # 화물통관 조회는 특별한 표시를 남김 (상위 레이어에서 처리)
+                return {
+                    "answer": "CARGO_TRACKING_DETECTED",
+                    "source": "cargo_tracking",
+                    "docs": [],
+                    "cargo_tracking": True,
+                    "original_question": input_dict.get("question", ""),
+                }
             else:
                 # 무역 관련이 아닌 질문에 대한 거부 응답
                 return {

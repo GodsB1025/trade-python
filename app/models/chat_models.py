@@ -154,3 +154,108 @@ class StreamingChatResponse(BaseModel):
         ..., description="이벤트의 종류 (예: 'token', 'metadata', 'error')"
     )
     data: dict = Field(..., description="이벤트와 관련된 데이터 페이로드")
+
+
+# ==================================
+# 화물통관 조회 응답 모델 (신규)
+# ==================================
+
+
+class CargoTrackingData(BaseModel):
+    """Spring으로 전송할 화물통관 조회 데이터"""
+
+    cargo_number: str = Field(..., description="추출된 화물번호")
+    cargo_type: Optional[str] = Field(None, description="화물 유형 (추론)")
+    extracted_patterns: List[str] = Field(
+        default_factory=list, description="인식된 패턴들"
+    )
+    confidence_score: float = Field(
+        ..., ge=0.0, le=1.0, description="인식 신뢰도 (0.0-1.0)"
+    )
+
+
+class CargoTrackingResponse(BaseModel):
+    """화물통관 조회 응답 스키마"""
+
+    intent_type: str = Field(default="cargo_tracking", description="의도 유형")
+    status: str = Field(..., description="처리 상태 (success, error)")
+    message: str = Field(..., description="사용자 확인 메시지")
+
+    # 성공 시 포함될 데이터
+    cargo_data: Optional[CargoTrackingData] = Field(
+        None, description="화물 조회 데이터"
+    )
+    spring_endpoint: Optional[str] = Field(
+        None, description="Spring 전송 대상 엔드포인트"
+    )
+
+    # 메타데이터
+    session_uuid: str = Field(..., description="세션 UUID")
+    user_id: Optional[int] = Field(None, description="사용자 ID")
+    processed_at: datetime = Field(
+        default_factory=datetime.now, description="처리 시각"
+    )
+    processing_time_ms: int = Field(..., description="처리 시간 (밀리초)")
+
+    # 에러 시 포함될 정보
+    error_code: Optional[str] = Field(None, description="에러 코드")
+    error_details: Optional[Dict[str, Any]] = Field(None, description="에러 상세 정보")
+
+
+class CargoTrackingError(BaseModel):
+    """화물통관 조회 에러 응답 스키마"""
+
+    intent_type: str = Field(default="cargo_tracking", description="의도 유형")
+    status: str = Field(default="error", description="처리 상태")
+    error_code: str = Field(..., description="에러 코드")
+    error_message: str = Field(..., description="에러 메시지")
+
+    # 원본 요청 정보
+    original_message: str = Field(..., description="원본 사용자 메시지")
+    session_uuid: str = Field(..., description="세션 UUID")
+    user_id: Optional[int] = Field(None, description="사용자 ID")
+
+    # 추가 정보
+    suggestions: List[str] = Field(default_factory=list, description="사용자 제안사항")
+    retry_available: bool = Field(default=True, description="재시도 가능 여부")
+    processed_at: datetime = Field(
+        default_factory=datetime.now, description="처리 시각"
+    )
+
+
+# 화물번호 패턴 정의 (상수)
+CARGO_NUMBER_PATTERNS = {
+    "container": r"[A-Z]{4}[0-9]{7}",  # 컨테이너 번호: ABCD1234567
+    "bl_number": r"[A-Z]{3}[0-9]{8,12}",  # B/L 번호: ABC12345678
+    "awb_number": r"[0-9]{3}-?[0-9]{8}",  # AWB 번호: 123-12345678
+    "tracking": r"[0-9]{10,15}",  # 일반 추적번호: 1234567890
+    "korean_format": r"[0-9]{4}-[0-9]{4}-[0-9]{4}",  # 한국 형식: 1234-5678-9012
+}
+
+# 화물통관 조회 관련 키워드
+CARGO_TRACKING_KEYWORDS = [
+    "화물",
+    "통관",
+    "조회",
+    "추적",
+    "운송",
+    "배송",
+    "수입",
+    "수출",
+    "컨테이너",
+    "선적",
+    "항공",
+    "해상",
+    "육상",
+    "물류",
+    "bl",
+    "awb",
+    "tracking",
+    "cargo",
+    "shipment",
+    "container",
+    "화물번호",
+    "추적번호",
+    "운송장번호",
+    "선적번호",
+]

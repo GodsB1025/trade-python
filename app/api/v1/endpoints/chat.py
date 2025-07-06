@@ -3,12 +3,12 @@
 """
 
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse  # JSONResponse 추가
 from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 import json
 import logging
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Union  # Union 추가
 
 from app.api.v1.dependencies import get_chat_service, get_db
 from app.models.chat_models import ChatRequest
@@ -25,7 +25,7 @@ async def handle_chat(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     chat_service: ChatService = Depends(get_chat_service),
-):
+) -> Union[StreamingResponse, JSONResponse]:
     """
     사용자의 채팅 메시지를 받아 AI와 대화하고, 응답을 실시간으로 스트리밍함.
     HSCode 관련 쿼리는 별도 처리함.
@@ -56,6 +56,22 @@ async def handle_chat(
     logger.info(f"메시지 내용: {chat_request.message[:100]}...")  # 처음 100자만 로깅
     logger.info(f"====================")
 
+    # === 화물통관 조회 감지 및 처리 ===
+    cargo_response = await chat_service.check_cargo_tracking_intent(chat_request)
+    if cargo_response:
+        logger.info("화물통관 조회 요청으로 감지됨. JSON 응답을 반환합니다.")
+        return JSONResponse(
+            content=cargo_response,
+            status_code=200,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            },
+        )
+
+    # === 일반 채팅 SSE 스트리밍 처리 ===
     async def generate_sse_stream() -> AsyncGenerator[str, None]:
         """
         SSE 형식의 스트림을 생성하는 비동기 제너레이터.
