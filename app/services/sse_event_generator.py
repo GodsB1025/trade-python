@@ -199,8 +199,8 @@ class SSEEventGenerator:
             "type": "hscode_inferred",
             "hscode": hscode,
             "product_name": product_name,
-            "confidence": 0.85,  # 예비 추론 단계의 신뢰도 (고정값)
-            "source": "preliminary_llm_extraction",
+            "confidence": 0.95,  # 최종 추출 단계의 신뢰도 (고정값, 필요시 조정)
+            "source": "final_llm_extraction",
             "timestamp": self._get_timestamp(),
         }
         return self._format_event("hscode_inferred", data)

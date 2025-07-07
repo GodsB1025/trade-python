@@ -77,46 +77,44 @@ class LLMProvider:
         # 'news'용 웹 검색 도구 (특정 도메인 제한 기능 포함)
         self.news_web_search_tool = {
             **self.basic_web_search_tool,
-            # "allowed_domains": [
-            #     # 프롬프트 수정 전 까지는 나머지 사이트들 전부 주석처리 ( 최신 내용을 못 가져옴 )
-            #     # 할 일.md 파일 참조.
-            #
-            #     # 글로벌 사이트들
-            #     "www.cnbc.com/shipping/",
-            #     "www.supplychaindive.com/",
-            #     "www.supplychainbrain.com/",
-            #     "supplychaindigital.com/",
-            #     "www.globaltrademag.com/",
-            #     "www.freightwaves.com/",
-            #     "www.maritime-executive.com/",
-            #     "aircargoworld.com/",
-            #     "theloadstar.com/",
-            #     "finance.yahoo.com/news/",
-            #     "indiashippingnews.com/",
-            #     "www.ajot.com/",
-            #     "www.scdigest.com/",
-            #     "www.inboundlogistics.com/",
-            #     "www.railjournal.com/",
-            #     "www.transportjournal.com/",
-            #     "landline.media/",
-            #     "www.aircargoweek.com/",
-            #     "www.automotivelogistics.media/",
-            #     "breakbulk.com/",
-            #     "gcaptain.com/",
-            #     "www.marinelink.com/",
-            #     "splash247.com/",
-            #
-            #     # 한국 사이트들
-            #     "dream.kotra.or.kr/kotranews/index.do",
-            #     "www.kita.net/board/totalTradeNews/totalTradeNewsList.do",
-            #     "www.kita.net/mberJobSport/shippers/board/list.do",
-            #     "www.klnews.co.kr",
-            #     "www.kcnews.org/",
-            #     "www.maritimepress.co.kr",
-            #     "www.weeklytrade.co.kr/",
-            #     "www.shippingnewsnet.com",
-            #     "www.cargotimes.net/"
-            # ],
+            "allowed_domains": [
+                # 프롬프트 수정 전 까지는 나머지 사이트들 전부 주석처리 ( 최신 내용을 못 가져옴 )
+                # 할 일.md 파일 참조.
+                # 글로벌 사이트들
+                # "www.cnbc.com/shipping/",
+                # "www.supplychaindive.com/",
+                # "www.supplychainbrain.com/",
+                # "supplychaindigital.com/",
+                # "www.globaltrademag.com/",
+                # "www.freightwaves.com/",
+                # "www.maritime-executive.com/",
+                # "aircargoworld.com/",
+                # "theloadstar.com/",
+                "finance.yahoo.com/news/",
+                # "indiashippingnews.com/",
+                # "www.ajot.com/",
+                # "www.scdigest.com/",
+                # "www.inboundlogistics.com/",
+                # "www.railjournal.com/",
+                # "www.transportjournal.com/",
+                # "landline.media/",
+                # "www.aircargoweek.com/",
+                # "www.automotivelogistics.media/",
+                # "breakbulk.com/",
+                # "gcaptain.com/",
+                # "www.marinelink.com/",
+                # "splash247.com/",
+                # # 한국 사이트들
+                # "dream.kotra.or.kr/kotranews/index.do",
+                # "www.kita.net/board/totalTradeNews/totalTradeNewsList.do",
+                # "www.kita.net/mberJobSport/shippers/board/list.do",
+                # "www.klnews.co.kr",
+                # "www.kcnews.org/",
+                # "www.maritimepress.co.kr",
+                # "www.weeklytrade.co.kr/",
+                # "www.shippingnewsnet.com",
+                # "www.cargotimes.net/"
+            ],
         }
 
         # 'monitoring'용 웹 검색 도구 (기본 설정 사용)
@@ -190,14 +188,14 @@ class LLMProvider:
             model_name="claude-sonnet-4-20250514",
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
-            max_tokens_to_sample=20_000,
+            max_tokens_to_sample=14_000,
             timeout=300.0,  # timeout을 5분 (300초)으로 명시적으로 설정
             max_retries=3,
             stop=None,
             default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
             },
-            thinking={"type": "enabled", "budget_tokens": 14_000},
+            thinking={"type": "enabled", "budget_tokens": 8_000},
             rate_limiter=chat_rate_limiter,  # HSCode 분류는 대화형이므로 채팅 제한기 사용
         )
 

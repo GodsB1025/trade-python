@@ -107,6 +107,30 @@ AI 응답: {ai_response[:500]}...
         return fallback_title
 
 
+async def update_session_title(
+    session_uuid_str: str,
+    user_message: str,
+    ai_response: str,
+):
+    """세션 제목을 비동기적으로 생성하고 업데이트하는 백그라운드 작업"""
+    async with SessionLocal() as db:
+        try:
+            title = await generate_session_title(user_message, ai_response)
+            session_uuid = uuid.UUID(session_uuid_str)
+            session = await db.get(db_models.ChatSession, session_uuid)
+            if session:
+                setattr(session, "session_title", title)
+                await db.commit()
+                logger.info(
+                    f"세션(UUID: {session_uuid_str}) 제목 업데이트 완료: '{title}'"
+                )
+        except Exception as e:
+            logger.error(
+                f"세션(UUID: {session_uuid_str}) 제목 업데이트 실패: {e}", exc_info=True
+            )
+            await db.rollback()
+
+
 async def _extract_hscode_from_message(
     message: str,
 ) -> tuple[Optional[str], Optional[str]]:
@@ -315,21 +339,8 @@ class ChatService:
             # 1. 사용자 요청 분석 및 LLM 모델 선택
             async for event in send_status(steps[0]):
                 yield event
-            extracted_hscode, extracted_product_name = None, None
+
             if is_hscode_intent:
-                # 상태 업데이트: 상세 정보 준비 시작
-                yield self.sse_generator.generate_processing_status_event(
-                    "HSCode 상세 정보 준비 시작", 2, total_steps, is_sub_step=True
-                )
-                extracted_hscode, extracted_product_name = (
-                    await _extract_hscode_from_message(chat_request.message)
-                )
-
-                if extracted_hscode:
-                    yield self.sse_generator.generate_hscode_inferred_event(
-                        extracted_hscode, extracted_product_name
-                    )
-
                 chat_model = llm_provider.hscode_llm_with_web_search
             else:
                 chat_model = llm_provider.news_chat_model
@@ -355,7 +366,7 @@ class ChatService:
                     if history:
                         human_message = HumanMessage(content=chat_request.message)
                         await history.aadd_message(human_message)
-                        await db.commit()
+                        # await db.commit() # 트랜잭션 분리 문제를 해결하기 위해 이 커밋을 제거합니다.
                 except Exception as db_error:
                     logger.error(f"DB 처리 중 오류: {db_error}", exc_info=True)
                     await db.rollback()
@@ -411,7 +422,7 @@ class ChatService:
     당신은 'TrAI-Bot'입니다. 대한민국 중소기업의 수출입 담당자, 특히 이제 막 무역을 시작하는 실무자들을 돕기 위해 설계된, 신뢰할 수 있는 'AI 무역 전문가'이자 '든든한 파트너'입니다. 당신의 목표는 단순한 정보 전달을 넘어, 사용자가 겪는 불안감을 '확신'으로 바꾸어 주는 것입니다.
 
     [2. 핵심 임무]
-    당신의 핵심 임무는 복잡하고 파편화된 무역 정보의 홍수 속에서, 사용자에게 '명확한 사실'과 '신뢰할 수 있는 출처'에 기반한 '실질적인 정보'를 제공하는 것입니다. 항상 중립적이고 객관적인 사실만을 전달해야 합니다.
+    당신의 핵심 임무는 복잡하고 파편화된 무역 정보의 홍수 속에서, 사용자에게 '명확한 사실'과 '신뢰할 수 있는 출처'에 기반한 '실질적인 정보'를 제공하는 것입니다. 최신 자료 기준으로 웹 검색을 통해 최신 정보를 반영하여 답변을 생성하십시오. 항상 중립적이고 객관적인 사실만을 전달해야 합니다.
 
     [3. 전문 분야]
     당신은 아래 분야에 대한 깊이 있는 지식을 갖추고 있습니다.
@@ -423,9 +434,11 @@ class ChatService:
     [4. 행동 원칙]
     당신은 다음 원칙을 반드시 준수해야 합니다.
     1.  **출처 명시 최우선**: 모든 핵심 정보(HS 코드, 관세율, 규제 내용 등)는 반드시 공신력 있는 출처를 명시해야 합니다. 출처 없이는 답변하지 않습니다. 예: `(출처: 대한민국 관세청, 2025-07-07)`
-    2.  **비관세장벽 강조**: 사용자가 관세만 묻더라도, 해당 품목의 수출입에 영향을 미칠 수 있는 중요한 비관세장벽 정보가 있다면 반드시 함께 언급하여 잠재적 리스크를 알려주십시오.
-    3.  **구조화된 답변**: 사용자가 쉽게 이해할 수 있도록, 답변을 명확한 소제목과 글머리 기호(bullet point)로 구조화하여 제공하십시오.
-    4.  **쉬운 언어 사용**: 전문 용어 사용을 최소화하고, 무역 초보자도 이해할 수 있는 명확하고 간결한 언어로 설명하십시오.
+    2.  **최신 정보 반영**: 반드시 어떠한 검색이던, 최신 정보 기준으로 반영하여 답변을 생성하십시오.
+    3.  **비관세장벽 강조**: 사용자가 관세만 묻더라도, 해당 품목의 수출입에 영향을 미칠 수 있는 중요한 비관세장벽 정보가 있다면 반드시 함께 언급하여 잠재적 리스크를 알려주십시오.
+    4.  **구조화된 답변**: 사용자가 쉽게 이해할 수 있도록, 답변을 명확한 소제목과 글머리 기호(bullet point)로 구조화하여 제공하십시오.
+    5.  **쉬운 언어 사용**: 전문 용어 사용을 최소화하고, 무역 초보자도 이해할 수 있는 명확하고 간결한 언어로 설명하십시오.
+
 
     [5. 제약 조건]
     - 절대 법적, 재정적 자문을 제공하지 마십시오.
@@ -438,23 +451,30 @@ class ChatService:
             messages.extend(previous_messages)
 
             # 5. 병렬 작업 시작 (HSCode 상세 버튼)
-            detail_page_generator = None
-            if is_hscode_intent:
-                async for event in send_status(steps[2]):
-                    yield event
-                detail_page_generator = (
-                    self.parallel_task_manager.execute_parallel_tasks(
-                        chat_request,
-                        db,
-                        background_tasks,
-                        extracted_hscode,
-                        extracted_product_name,
-                    )
-                )
-                try:
-                    yield await detail_page_generator.__anext__()
-                except StopAsyncIteration:
-                    pass
+            # detail_page_generator = None
+            # if is_hscode_intent:
+            #     async for event in send_status(steps[2]):
+            #         yield event
+
+            #     # HSCode 사전 추출 로직을 제거하고, 메인 LLM이 컨텍스트를 활용하도록 함
+            #     # _extract_hscode_from_message는 병렬 작업에서만 사용되도록 변경
+            #     extracted_hscode, extracted_product_name = (
+            #         await _extract_hscode_from_message(chat_request.message)
+            #     )
+
+            #     detail_page_generator = (
+            #         self.parallel_task_manager.execute_parallel_tasks(
+            #             chat_request,
+            #             db,
+            #             background_tasks,
+            #             extracted_hscode,
+            #             extracted_product_name,
+            #         )
+            #     )
+            #     try:
+            #         yield await detail_page_generator.__anext__()
+            #     except StopAsyncIteration:
+            #         pass
 
             # 6. AI의 사고 과정 및 최종 답변 스트리밍
             async for event in send_status(steps[3 if is_hscode_intent else 2]):
@@ -462,6 +482,8 @@ class ChatService:
 
             current_user_message = HumanMessage(content=chat_request.message)
             if is_hscode_intent:
+                # 상세페이지 로직이 주석 처리되었으므로, 관련 변수를 None으로 초기화
+                extracted_hscode, extracted_product_name = None, None
                 current_user_message.content = (
                     self.hscode_classification_service.create_expert_prompt(
                         user_message=chat_request.message,
@@ -498,12 +520,35 @@ class ChatService:
                     web_search_urls.extend(data.get("urls", []))
                     yield data.get("event_str")  # 웹 검색 완료 SSE 문자열
 
-            # 7. 스트림 종료 및 후처리
+            # 7. 스트리밍 종료 및 후처리
             yield self.sse_generator._format_event(
                 "chat_content_stop",
                 {"type": "content_block_stop", "index": content_index},
             )
 
+            # 7-1. 최종 응답에서 HSCode 추출 및 이벤트 전송
+            if is_hscode_intent and final_response_text:
+                hscode_match = re.search(
+                    r"(?:가장 유력한 HS Code|HS Code|HS CODE)[:\s`]*(\d{4}\.\d{2}(?:\.\d{4})?|\d{6,10})",
+                    final_response_text,
+                    re.IGNORECASE,
+                )
+                if hscode_match:
+                    final_hscode = hscode_match.group(1)
+                    # 품목명은 사용자 메시지 기반으로 다시 추출
+                    _, product_name_for_event = await _extract_hscode_from_message(
+                        chat_request.message
+                    )
+                    logger.info(
+                        f"최종 응답에서 HSCode 추출 성공: {final_hscode}, 품목명: {product_name_for_event}"
+                    )
+                    yield self.sse_generator.generate_hscode_inferred_event(
+                        final_hscode, product_name_for_event
+                    )
+                else:
+                    logger.warning("최종 응답에서 HSCode를 추출하지 못했습니다.")
+
+            # 7-2. 웹 검색 결과가 있으면 이벤트 전송
             if web_search_urls:
                 yield self.sse_generator._format_event(
                     "web_search_results",
@@ -514,22 +559,35 @@ class ChatService:
                     },
                 )
 
-            if detail_page_generator:
-                async for event in detail_page_generator:
-                    yield event
+            # 8. 병렬 작업(상세 버튼) 나머지 결과 스트리밍
+            # if detail_page_generator:
+            #     async for event in detail_page_generator:
+            #         yield event
+
+            # 9. 대화 내용 저장
+            async for event in send_status(steps[-1]):
+                yield event
 
             if user_id and history and final_response_text:
-                async for event in send_status(steps[-1]):
-                    yield event
-                await history.aadd_message(AIMessage(content=final_response_text))
-                await db.commit()
+                try:
+                    # AI 응답 저장
+                    ai_message = AIMessage(content=final_response_text)
+                    await history.aadd_message(ai_message)
 
-            if user_id and is_new_session and session_obj and final_response_text:
-                title = await generate_session_title(
-                    chat_request.message, final_response_text
-                )
-                setattr(session_obj, "session_title", title)
-                await db.commit()
+                    # 세션 제목 생성 (새 세션인 경우에만)
+                    if is_new_session and session_obj:
+                        background_tasks.add_task(
+                            update_session_title,
+                            str(session_obj.session_uuid),
+                            chat_request.message,
+                            final_response_text,
+                        )
+
+                    await db.commit()
+                    logger.info("대화 내용이 성공적으로 저장되었습니다.")
+                except Exception as db_error:
+                    logger.error(f"대화 내용 저장 실패: {db_error}", exc_info=True)
+                    await db.rollback()
 
             yield self.sse_generator._format_event(
                 "chat_message_delta",

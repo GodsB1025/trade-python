@@ -3,6 +3,9 @@
 """
 
 import enum
+from datetime import datetime
+from typing import List, Optional
+from uuid import UUID
 
 from sqlalchemy import (
     Column,
@@ -25,7 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, BIGINT, ARRAY
 from pgvector.sqlalchemy import Vector
-from sqlalchemy.orm import relationship, declarative_base
+from sqlalchemy.orm import relationship, declarative_base, Mapped, mapped_column
 from sqlalchemy import func
 from pgvector.sqlalchemy import Vector
 
@@ -120,30 +123,30 @@ class ChatSession(Base):
 
     __tablename__ = "chat_sessions"
 
-    session_uuid = Column(
+    session_uuid: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         server_default=func.gen_random_uuid(),
         comment="세션 UUID - 단일 기본키",
     )
-    user_id = Column(
+    user_id: Mapped[int] = mapped_column(
         BIGINT, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    created_at = Column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
         index=True,
         comment="세션 생성 시간 - 인덱스로 성능 보장",
     )
-    updated_at = Column(
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    session_title = Column(String(255))
-    message_count = Column(Integer, nullable=False, default=0)
+    session_title: Mapped[Optional[str]] = mapped_column(String(255))
+    message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    user = relationship("User", back_populates="chat_sessions")
-    messages = relationship(
+    user: Mapped["User"] = relationship("User", back_populates="chat_sessions")
+    messages: Mapped[List["ChatMessage"]] = relationship(
         "ChatMessage",
         back_populates="session",
         cascade="all, delete-orphan",
