@@ -1,5 +1,4 @@
 import anthropic
-import httpx
 from langchain_anthropic import ChatAnthropic
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_voyageai import VoyageAIEmbeddings
@@ -43,13 +42,15 @@ class LLMProvider:
 
         # 2. 앤트로픽 챗 모델 초기화
         # API 키를 명시적으로 전달하여 인증 문제 방지
+
         base_llm = ChatAnthropic(
             model_name=settings.ANTHROPIC_MODEL,
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),  # SecretStr로 변환하여 전달
             temperature=1,
-            max_tokens_to_sample=12_000,
-            timeout=600,
+            max_tokens_to_sample=15_000,  # thinking budget_tokens보다 충분히 크게 설정
+            timeout=1200.0,  # 20분으로 설정 (30초 제한 해결)
             max_retries=5,  # 재시도 횟수를 5회로 증가
+            streaming=True,
             stop=None,
             default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
@@ -183,14 +184,18 @@ class LLMProvider:
             model_name="claude-sonnet-4-20250514",
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
-            max_tokens_to_sample=14_000,
-            timeout=300.0,  # timeout을 5분 (300초)으로 명시적으로 설정
+            max_tokens_to_sample=20_000,  # thinking budget_tokens보다 충분히 크게 설정
+            timeout=900.0,  # 15분으로 설정 (30초 제한 해결)
             max_retries=5,  # 재시도 횟수를 5회로 증가
             stop=None,
+            streaming=True,
             default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
             },
-            thinking={"type": "enabled", "budget_tokens": 14_000},
+            thinking={
+                "type": "enabled",
+                "budget_tokens": 10_000,
+            },  # max_tokens보다 작게 설정
             rate_limiter=anthropic_rate_limiter,
         )
 
