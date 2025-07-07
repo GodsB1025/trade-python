@@ -15,7 +15,6 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic import SecretStr
 
 from app.core.config import settings
-from app.core.llm_provider import llm_provider
 
 # from app.services.web_search_service import WebSearchService # 이 줄을 삭제합니다.
 
@@ -26,7 +25,25 @@ class EnhancedDetailGenerator:
     """상세페이지 정보 생성 서비스 - AI 기반 종합 분석"""
 
     def __init__(self):
-        self.llm = llm_provider.base_llm
+        # 하드코딩된 ChatAnthropic 모델
+        from langchain_anthropic import ChatAnthropic
+        from pydantic import SecretStr
+
+        self.llm = ChatAnthropic(
+            model_name=settings.ANTHROPIC_MODEL,
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=1,
+            max_tokens_to_sample=15_000,
+            timeout=1200.0,
+            max_retries=5,
+            streaming=True,
+            stop=None,
+            default_headers={
+                "anthropic-beta": "extended-cache-ttl-2025-04-11",
+                "anthropic-version": "2023-06-01",
+            },
+            thinking={"type": "enabled", "budget_tokens": 6_000},
+        )
         # self.web_search_service = WebSearchService() # 이 줄을 삭제합니다.
 
         # 주요 수출입 대상국

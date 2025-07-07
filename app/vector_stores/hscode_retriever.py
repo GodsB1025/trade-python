@@ -2,7 +2,6 @@ from langchain_core.vectorstores import VectorStoreRetriever
 from langchain_postgres import PGVectorStore, PGEngine
 
 from app.core.config import settings
-from app.core.llm_provider import llm_provider
 
 # PGVector 스토어 설정
 # 1. langchain-postgres의 PGVectorStore는 SQLAlchemy의 연결 엔진을 사용
@@ -12,8 +11,15 @@ engine = PGEngine.from_connection_string(url=connection_string)
 
 collection_name = "hscode_vectors"  # 실제로는 테이블 이름을 의미
 
-# LLMProvider에서 임베딩 모델을 가져옴
-embeddings = llm_provider.embedding_model
+# 하드코딩된 임베딩 모델
+from langchain_voyageai import VoyageAIEmbeddings
+from pydantic import SecretStr
+
+embeddings = VoyageAIEmbeddings(
+    model="voyage-3-large",
+    batch_size=32,
+    api_key=SecretStr(settings.VOYAGE_API_KEY),
+)
 
 
 # 새로운 PGVectorStore 인스턴스 생성.
@@ -50,7 +56,4 @@ def get_hscode_retriever() -> VectorStoreRetriever:
     Returns:
         VectorStoreRetriever: 설정된 검색 옵션(예: k=5)을 사용하는 retriever.
     """
-    return store.as_retriever(
-        search_type="similarity",
-        search_kwargs={'k': 5}
-    )
+    return store.as_retriever(search_type="similarity", search_kwargs={"k": 5})

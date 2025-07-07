@@ -18,8 +18,8 @@ def main():
         host=settings.SERVER_HOST,
         port=settings.SERVER_PORT,
         reload=settings.debug,
-        timeout_keep_alive=300,
-        timeout_graceful_shutdown=30
+        timeout_keep_alive=600,  # 10분으로 증가
+        timeout_graceful_shutdown=60,  # 1분으로 증가
         log_level="info" if not settings.debug else "debug",
     )
 

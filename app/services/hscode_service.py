@@ -20,7 +20,6 @@ from app.models.hscode_models import (
 )
 from app.models.db_models import HscodeVector
 from app.core.config import settings
-from app.core.llm_provider import llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +48,24 @@ class HSCodeService:
     }
 
     def __init__(self):
-        self.llm = llm_provider.base_llm
+        # 하드코딩된 ChatAnthropic 모델
+        from langchain_anthropic import ChatAnthropic
+
+        self.llm = ChatAnthropic(
+            model_name=settings.ANTHROPIC_MODEL,
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=1,
+            max_tokens_to_sample=15_000,
+            timeout=1200.0,
+            max_retries=5,
+            streaming=True,
+            stop=None,
+            default_headers={
+                "anthropic-beta": "extended-cache-ttl-2025-04-11",
+                "anthropic-version": "2023-06-01",
+            },
+            thinking={"type": "enabled", "budget_tokens": 6_000},
+        )
         self.embeddings = VoyageAIEmbeddings(
             api_key=SecretStr(settings.VOYAGE_API_KEY),
             model="voyage-multilingual-2",

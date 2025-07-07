@@ -15,8 +15,6 @@ from app.core.config import settings
 from app.core.logging_config import configure_logging
 from app.core.middleware.logging_middleware import LoggingMiddleware
 
-# LangChain 디버그 모드 활성화
-# True로 설정 시, 모든 LangChain 구성 요소의 상세한 입출력 정보를 로깅합니다.
 set_debug(True)
 
 logger = logging.getLogger(__name__)

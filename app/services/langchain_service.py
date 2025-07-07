@@ -3,6 +3,7 @@ import re  # re 모듈 임포트
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any, Literal
 
+import anthropic
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import (
     Runnable,
@@ -17,7 +18,6 @@ from langchain_core.documents import Document
 from langchain_anthropic import ChatAnthropic
 from pydantic import SecretStr
 
-from app.core.llm_provider import llm_provider
 from app.models.monitoring_models import MonitoringUpdate, SearchResult
 from app.vector_stores.hscode_retriever import get_hscode_retriever
 from app.core.config import settings
@@ -61,9 +61,47 @@ class LLMService:
     """
 
     def __init__(self):
-        self.retry_config = llm_provider.retry_config
+        self.retry_config = {
+            "stop_after_attempt": 5,  # 재시도 횟수를 5회로 조정 (더 현실적인 값)
+            "wait_exponential_jitter": True,  # 지수적으로 대기 시간 증가 (jitter 포함)
+            "retry_if_exception_type": (
+                anthropic.InternalServerError,
+                anthropic.RateLimitError,
+                anthropic.APIStatusError,  # OverloadedError 포함
+                anthropic.APIConnectionError,  # 연결 문제도 재시도
+            ),
+        }
+
+        # 하드코딩된 LLM 모델들과 도구들
+        # 1. 기본 ChatAnthropic 모델 초기화
+        self.base_llm = ChatAnthropic(
+            model_name=settings.ANTHROPIC_MODEL,
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=1,
+            max_tokens_to_sample=15_000,
+            timeout=1200.0,  # 20분으로 설정
+            max_retries=5,
+            streaming=True,
+            stop=None,
+            default_headers={
+                "anthropic-beta": "extended-cache-ttl-2025-04-11",
+                "anthropic-version": "2023-06-01",
+            },
+            thinking={"type": "enabled", "budget_tokens": 6_000},
+        )
+
+        # 2. 모니터링용 웹 검색 도구 정의
+        self.monitoring_web_search_tool = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "cache_control": {"type": "ephemeral"},
+            "max_uses": 5,
+        }
+
+        # 3. 체인 생성
         self.monitoring_chain = self._create_monitoring_chain()
         self.chat_chain = self._create_chat_chain()
+
         # Claude 3.5 Haiku 모델 초기화
         self.question_classifier = ChatAnthropic(
             model_name="claude-3-5-haiku-latest",
@@ -246,8 +284,68 @@ class LLMService:
         # 1. 체인 구성 요소들
         retriever = get_hscode_retriever()
         output_parser = StrOutputParser()
-        llm = llm_provider.news_chat_model
-        llm_with_web_search = llm_provider.news_llm_with_native_search
+        llm = ChatAnthropic(
+            model_name="claude-sonnet-4-20250514",
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
+            max_tokens_to_sample=12_000,  # thinking budget_tokens보다 충분히 크게 설정
+            timeout=900.0,  # 15분으로 설정 (30초 제한 해결)
+            max_retries=5,  # 재시도 횟수를 5회로 증가
+            stop=None,
+            streaming=True,
+            default_headers={
+                "anthropic-beta": "extended-cache-ttl-2025-04-11",
+            },
+            thinking={
+                "type": "enabled",
+                "budget_tokens": 2000,
+            },  # max_tokens보다 작게 설정
+        )
+
+        llm_with_web_search = llm.bind_tools(
+            [
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "cache_control": {"type": "ephemeral"},
+                    "max_uses": 3,
+                    "allowed_domains": [
+                        # 국제기구 공식 사이트 (최고 신뢰도)
+                        "www.wcotradetools.org",
+                        "www.wcoomd.org",
+                        "hstracker.wto.org",
+                        # 미국 정부 공식 사이트
+                        "www.trade.gov",
+                        "www.census.gov",
+                        "hts.usitc.gov",
+                        "rulings.cbp.gov",
+                        # EU 및 영국 공식 사이트
+                        "ec.europa.eu",
+                        "www.gov.uk",
+                        "www.revenue.ie",
+                        "www.anpost.com",
+                        "www.kvk.nl",
+                        # 아시아태평양 정부 공식 사이트
+                        "unipass.customs.go.kr",
+                        "www.customs.go.jp",
+                        "www.post.japanpost.jp",
+                        "www.customs.gov.sg",
+                        "www.abs.gov.au",
+                        "www.abf.gov.au",
+                        "ised-isde.canada.ca",
+                        "www.canadapost-postescanada.ca",
+                        "ezhs.customs.gov.my",
+                        # 신뢰할 수 있는 상용 도구
+                        "www.avalara.com",
+                        "zonos.com",
+                        "www.customsinfo.com",
+                        "www.tariffnumber.com",
+                        "www.dhl.com",
+                        "www.fedex.com",
+                    ],
+                }
+            ]
+        )
 
         # 2. 프롬프트 템플릿들
         # 무역 전문가 프롬프트
@@ -481,11 +579,11 @@ class LLMService:
             )
 
         # 1. 사용할 도구 목록 정의: 네이티브 웹 검색 + Pydantic 스키마
-        tools = [llm_provider.monitoring_web_search_tool, LLMMonitoringOutput]
+        tools = [self.monitoring_web_search_tool, LLMMonitoringOutput]
 
         # 2. LLM에 두 도구를 모두 바인딩
         #    강력한 프롬프트를 통해 모델이 웹 검색을 수행하고, 최종 답변은 Pydantic 도구로 포맷하도록 유도
-        llm_with_tools = llm_provider.base_llm.bind_tools(tools)
+        llm_with_tools = self.base_llm.bind_tools(tools)
 
         # 3. 재시도 로직 적용
         llm_with_retry = llm_with_tools.with_retry(**self.retry_config)

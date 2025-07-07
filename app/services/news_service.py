@@ -17,7 +17,6 @@ from rapidfuzz import fuzz, process, utils
 
 from app.chains.prompt_chains import create_trade_news_prompt
 from app.core.config import settings
-from app.core.llm_provider import llm_provider
 from app.db import crud
 from app.models.schemas import TradeNewsCreate
 from app.utils.llm_response_parser import (
@@ -196,9 +195,38 @@ class NewsService:
     """
 
     def __init__(self):
-        # llm_provider에서 웹 검색 기능이 바인딩된 모델을 가져옴
-        self.llm_with_native_search = llm_provider.news_llm_with_native_search
-        self.anthropic_chat_model = llm_provider.news_chat_model
+        # 하드코딩된 웹 검색 기능이 바인딩된 모델
+        from pydantic import SecretStr
+
+        base_llm = ChatAnthropic(
+            model_name=settings.ANTHROPIC_MODEL,
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=1,
+            max_tokens_to_sample=15_000,
+            timeout=1200.0,
+            max_retries=5,
+            streaming=True,
+            stop=None,
+            default_headers={
+                "anthropic-beta": "extended-cache-ttl-2025-04-11",
+                "anthropic-version": "2023-06-01",
+            },
+            thinking={"type": "enabled", "budget_tokens": 6_000},
+        )
+
+        # 뉴스용 웹 검색 도구
+        news_web_search_tool = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "cache_control": {"type": "ephemeral"},
+            "max_uses": 5,
+            "allowed_domains": [
+                "finance.yahoo.com/news/",
+            ],
+        }
+
+        self.llm_with_native_search = base_llm.bind_tools([news_web_search_tool])
+        self.anthropic_chat_model = base_llm
 
     def _create_news_dtos_from_response(
         self, news_items_from_llm: List[Dict[str, Any]], citation_urls: List[str]

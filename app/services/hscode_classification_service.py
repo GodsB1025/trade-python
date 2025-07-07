@@ -6,10 +6,11 @@ from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 from enum import Enum
 
+from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
-from app.core.llm_provider import llm_provider
+from app.core.config import settings
 from app.utils.llm_response_parser import extract_text_from_anthropic_response
 
 # ChatRequest import 복원 (runtime에서 실제 사용되므로 필요)
@@ -278,8 +279,69 @@ class HSCodeClassificationService:
     """HSCode 분류 전문 서비스"""
 
     def __init__(self):
-        self.hscode_llm = llm_provider.hscode_chat_model
-        self.hscode_llm_with_search = llm_provider.hscode_llm_with_web_search
+
+        self.hscode_web_search_tool = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "cache_control": {"type": "ephemeral"},
+            "max_uses": 3,
+            "allowed_domains": [
+                # 국제기구 공식 사이트 (최고 신뢰도)
+                "www.wcotradetools.org",
+                "www.wcoomd.org",
+                "hstracker.wto.org",
+                # 미국 정부 공식 사이트
+                "www.trade.gov",
+                "www.census.gov",
+                "hts.usitc.gov",
+                "rulings.cbp.gov",
+                # EU 및 영국 공식 사이트
+                "ec.europa.eu",
+                "www.gov.uk",
+                "www.revenue.ie",
+                "www.anpost.com",
+                "www.kvk.nl",
+                # 아시아태평양 정부 공식 사이트
+                "unipass.customs.go.kr",
+                "www.customs.go.jp",
+                "www.post.japanpost.jp",
+                "www.customs.gov.sg",
+                "www.abs.gov.au",
+                "www.abf.gov.au",
+                "ised-isde.canada.ca",
+                "www.canadapost-postescanada.ca",
+                "ezhs.customs.gov.my",
+                # 신뢰할 수 있는 상용 도구
+                "www.avalara.com",
+                "zonos.com",
+                "www.customsinfo.com",
+                "www.tariffnumber.com",
+                "www.dhl.com",
+                "www.fedex.com",
+            ],
+        }
+
+        self.hscode_llm = ChatAnthropic(
+            model_name="claude-sonnet-4-20250514",
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+            temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
+            max_tokens_to_sample=12_000,  # thinking budget_tokens보다 충분히 크게 설정
+            timeout=900.0,  # 15분으로 설정 (30초 제한 해결)
+            max_retries=5,  # 재시도 횟수를 5회로 증가
+            stop=None,
+            streaming=True,
+            default_headers={
+                "anthropic-beta": "extended-cache-ttl-2025-04-11",
+            },
+            thinking={
+                "type": "enabled",
+                "budget_tokens": 6000,
+            },  # max_tokens보다 작게 설정
+        )
+        self.hscode_llm_with_search = self.hscode_llm.bind_tools(
+            [self.hscode_web_search_tool]
+        )
+
         self.info_template = HSCodeRequiredInfoTemplate()
 
     def create_expert_prompt(
@@ -300,7 +362,7 @@ class HSCodeClassificationService:
     </persona>
 
     <instructions>
-        You are given a user's query about an HS Code. Analyze it and generate a structured response in Korean within the `<final_response>` tag.
+        You are given a user's query about an HS Code. Analyze it and generate a structured response in Korean.
 
         **Critical Analysis Protocol:**
         1.  **Best-Effort Analysis on Ambiguity**: Even if the user's query is vague, you MUST perform a preliminary best-effort analysis. Do not refuse to answer.
@@ -327,11 +389,9 @@ class HSCodeClassificationService:
         You MUST provide your response exclusively in the following Markdown format. The content inside the placeholders `[]` must be in Korean.
 
         ---
-        
-        > [!NOTE]
+
         > **가장 유력한 예상 HSCode:** `[가장 유력하게 예상되는 HSCode]`
         >
-        > *이 코드는 잠정적인 예측이며, 정확한 분류를 위해 아래 상세 분석 내용을 반드시 확인해 주세요.*
 
         ---
 
@@ -373,7 +433,6 @@ class HSCodeClassificationService:
         
         ---
 
-        > [!TIP]
         > ### ❓ 추가 정보 요청
         >
         > 현재 주신 정보를 바탕으로 최선의 분석을 제공해 드렸습니다. 더 정확한 HSCode와 규제 정보 분석을 위해 아래 정보를 추가로 알려주시겠어요?

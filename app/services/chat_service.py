@@ -15,7 +15,7 @@ from typing import (
 import uuid
 from datetime import datetime
 from langchain_core.output_parsers import StrOutputParser
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from langchain_core.documents import Document
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,7 @@ from pydantic import SecretStr
 
 # anthropic 에러 처리를 위한 import 추가
 import anthropic
+import httpx
 
 from app.db import crud
 from app.db.session import SessionLocal
@@ -51,7 +52,6 @@ from app.services.intent_classification_service import (
 )
 from app.services.enhanced_detail_generator import EnhancedDetailGenerator
 from app.core.config import settings
-from app.core.llm_provider import llm_provider
 from app.services.parallel_task_manager import ParallelTaskManager
 from app.services.sse_event_generator import SSEEventGenerator
 from app.models import db_models
@@ -67,7 +67,7 @@ async def generate_session_title(user_message: str, ai_response: str) -> str:
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=0.3,
             max_tokens_to_sample=100,
-            timeout=300.0,
+            timeout=120.0,  # 더 긴 timeout 설정
             streaming=True,
             stop=None,
         )
@@ -147,7 +147,7 @@ async def _extract_hscode_from_message(
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=0.0,
             max_tokens_to_sample=200,
-            timeout=300.0,
+            timeout=120.0,  # 더 긴 timeout 설정
             stop=None,
         )
         prompt = f"""사용자의 다음 메시지에서 HSCode와 가장 핵심적인 품목명을 추출해주세요.
@@ -299,6 +299,7 @@ class ChatService:
         chat_request: ChatRequest,
         db: AsyncSession,
         background_tasks: BackgroundTasks,
+        request: Optional[Request] = None,
     ) -> AsyncGenerator[str, None]:
         user_id = chat_request.user_id
         session_uuid_str = chat_request.session_uuid
@@ -309,6 +310,7 @@ class ChatService:
         final_response_text = ""
         is_new_session = False
         previous_messages: List[BaseMessage] = []
+        disconnect_monitor: Optional[asyncio.Task] = None
 
         # --- 단계별 상태 메시지 정의 ---
         steps = [
@@ -338,7 +340,23 @@ class ChatService:
             )
             await asyncio.sleep(0.1)
 
+        async def check_client_disconnection():
+            """클라이언트 연결 상태를 주기적으로 확인"""
+            if request:
+                try:
+                    while True:
+                        if await request.is_disconnected():
+                            logger.info("클라이언트 연결 해제 감지됨")
+                            break
+                        await asyncio.sleep(1)  # 1초마다 확인
+                except asyncio.CancelledError:
+                    logger.info("클라이언트 연결 모니터링이 취소되었습니다")
+
         try:
+            # 클라이언트 연결 상태 모니터링 백그라운드 작업 시작
+            if request:
+                disconnect_monitor = asyncio.create_task(check_client_disconnection())
+
             # 1. 사용자 요청 분석 및 LLM 모델 선택
             async for event in send_status(steps[0]):
                 yield event
@@ -351,9 +369,96 @@ class ChatService:
                 extracted_hscode, extracted_product_name = (
                     await _extract_hscode_from_message(chat_request.message)
                 )
-                chat_model = llm_provider.hscode_llm_with_web_search
+                # HSCode 분석용 하드코딩된 ChatAnthropic 모델
+                chat_model = ChatAnthropic(
+                    model_name="claude-sonnet-4-20250514",
+                    api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+                    temperature=1.0,
+                    max_tokens_to_sample=12_000,
+                    timeout=900.0,
+                    max_retries=5,
+                    stop=None,
+                    streaming=True,
+                    default_headers={
+                        "anthropic-beta": "extended-cache-ttl-2025-04-11",
+                    },
+                    thinking={
+                        "type": "enabled",
+                        "budget_tokens": 2000,
+                    },
+                ).bind_tools(
+                    [
+                        {
+                            "type": "web_search_20250305",
+                            "name": "web_search",
+                            "cache_control": {"type": "ephemeral"},
+                            "max_uses": 3,
+                            "allowed_domains": [
+                                # 국제기구 공식 사이트 (최고 신뢰도)
+                                "www.wcotradetools.org",
+                                "www.wcoomd.org",
+                                "hstracker.wto.org",
+                                # 미국 정부 공식 사이트
+                                "www.trade.gov",
+                                "www.census.gov",
+                                "hts.usitc.gov",
+                                "rulings.cbp.gov",
+                                # EU 및 영국 공식 사이트
+                                "ec.europa.eu",
+                                "www.gov.uk",
+                                "www.revenue.ie",
+                                "www.anpost.com",
+                                "www.kvk.nl",
+                                # 아시아태평양 정부 공식 사이트
+                                "unipass.customs.go.kr",
+                                "www.customs.go.jp",
+                                "www.post.japanpost.jp",
+                                "www.customs.gov.sg",
+                                "www.abs.gov.au",
+                                "www.abf.gov.au",
+                                "ised-isde.canada.ca",
+                                "www.canadapost-postescanada.ca",
+                                "ezhs.customs.gov.my",
+                                # 신뢰할 수 있는 상용 도구
+                                "www.avalara.com",
+                                "zonos.com",
+                                "www.customsinfo.com",
+                                "www.tariffnumber.com",
+                                "www.dhl.com",
+                                "www.fedex.com",
+                            ],
+                        }
+                    ]
+                )
             else:
-                chat_model = llm_provider.news_chat_model
+                # 일반 뉴스/채팅용 하드코딩된 ChatAnthropic 모델
+                chat_model = ChatAnthropic(
+                    model_name=settings.ANTHROPIC_MODEL,
+                    api_key=SecretStr(settings.ANTHROPIC_API_KEY),
+                    temperature=1,
+                    max_tokens_to_sample=15_000,
+                    timeout=1200.0,
+                    max_retries=5,
+                    streaming=True,
+                    stop=None,
+                    default_headers={
+                        "anthropic-beta": "extended-cache-ttl-2025-04-11",
+                        "anthropic-version": "2023-06-01",
+                    },
+                    thinking={"type": "enabled", "budget_tokens": 6_000},
+                ).bind_tools(
+                    [
+                        {
+                            "type": "web_search_20250305",
+                            "name": "web_search",
+                            "cache_control": {"type": "ephemeral"},
+                            "max_uses": 5,
+                            "allowed_domains": [
+                                "finance.yahoo.com/news/",
+                            ],
+                        }
+                    ]
+                )
 
             # 2. 대화 맥락 파악 (DB 처리)
             async for event in send_status(steps[1]):
@@ -459,9 +564,7 @@ class ChatService:
             messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
             messages.extend(previous_messages)
 
-            # 5. 병렬 작업 시작 (주석 처리됨)
-
-            # 6. AI의 사고 과정 및 최종 답변 스트리밍
+            # 5. AI의 사고 과정 및 최종 답변 스트리밍
             async for event in send_status(steps[3 if is_hscode_intent else 2]):
                 yield event
 
@@ -542,12 +645,19 @@ class ChatService:
                 )
             messages.append(current_user_message)
 
-            # 6-1. 직접 스트리밍 처리 (astream_events 우회)
-            logger.info("🚀 직접 스트리밍 시작...")
+            # 6. LLM 직접 스트리밍 처리 (cancellation 문제 해결)
+            logger.info("🚀 LLM 스트리밍 시작 (안정화된 버전)...")
 
             try:
-                # 직접 astream 사용하여 스트리밍
+                # 직접 astream 사용하여 스트리밍 (cancellation 내성)
                 async for chunk in chat_model.astream(messages):
+                    # 클라이언트 연결 해제 확인 (선택적 중단)
+                    if request and await request.is_disconnected():
+                        logger.info(
+                            "클라이언트 연결이 해제되어 LLM 스트리밍을 중단합니다."
+                        )
+                        break
+
                     if hasattr(chunk, "content") and chunk.content:
                         content_text = ""
 
@@ -577,45 +687,108 @@ class ChatService:
                             yield self.sse_generator._format_event(
                                 "chat_content_delta", delta_event
                             )
+
+            except anthropic.APIConnectionError as e:
+                logger.error(f"Anthropic API 연결 오류: {e}")
+                error_text = (
+                    "일시적인 네트워크 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
+                )
+                yield self.sse_generator._format_event(
+                    "chat_content_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": content_index,
+                        "delta": {"type": "text_delta", "text": error_text},
+                    },
+                )
+            except anthropic.RateLimitError as e:
+                logger.error(f"Anthropic API 요청 한도 초과: {e}")
+                error_text = (
+                    "요청이 많아 처리가 지연되고 있습니다. 잠시 후 다시 시도해주세요."
+                )
+                yield self.sse_generator._format_event(
+                    "chat_content_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": content_index,
+                        "delta": {"type": "text_delta", "text": error_text},
+                    },
+                )
+            except asyncio.CancelledError:
+                # CancelledError를 잡아서 무시하고 부분 응답이라도 완료 처리
+                logger.warning("LLM 스트리밍이 취소되었지만 부분 응답을 유지합니다.")
+                if final_response_text:
+                    completion_text = "\n\n[네트워크 이슈로 응답이 중단되었지만 가능한 정보를 제공했습니다]"
+                    yield self.sse_generator._format_event(
+                        "chat_content_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": content_index,
+                            "delta": {"type": "text_delta", "text": completion_text},
+                        },
+                    )
             except Exception as stream_error:
-                logger.error(f"직접 스트리밍 실패: {stream_error}")
+                logger.error(f"LLM 스트리밍 실패: {stream_error}")
 
                 # 폴백: 일반 invoke 사용
                 logger.info("🔄 폴백 모드: invoke 사용...")
-                response = await chat_model.ainvoke(messages)
+                try:
+                    response = await chat_model.ainvoke(messages)
 
-                if hasattr(response, "content"):
-                    response_text = ""
+                    if hasattr(response, "content"):
+                        response_text = ""
 
-                    if isinstance(response.content, str):
-                        response_text = response.content
-                    elif isinstance(response.content, list):
-                        for content_block in response.content:
-                            if (
-                                isinstance(content_block, dict)
-                                and content_block.get("type") == "text"
-                            ):
-                                response_text += content_block.get("text", "")
-                            elif isinstance(content_block, str):
-                                response_text += content_block
+                        if isinstance(response.content, str):
+                            response_text = response.content
+                        elif isinstance(response.content, list):
+                            for content_block in response.content:
+                                if (
+                                    isinstance(content_block, dict)
+                                    and content_block.get("type") == "text"
+                                ):
+                                    response_text += content_block.get("text", "")
+                                elif isinstance(content_block, str):
+                                    response_text += content_block
 
-                    if response_text:
-                        final_response_text = response_text
-                        logger.info(f"✅ 전체 응답 수신 (길이: {len(response_text)})")
-
-                        # 청크별로 나누어 전송 (의사 스트리밍)
-                        chunk_size = 50
-                        for i in range(0, len(response_text), chunk_size):
-                            chunk_text = response_text[i : i + chunk_size]
-                            delta_event = {
-                                "type": "content_block_delta",
-                                "index": content_index,
-                                "delta": {"type": "text_delta", "text": chunk_text},
-                            }
-                            yield self.sse_generator._format_event(
-                                "chat_content_delta", delta_event
+                        if response_text:
+                            final_response_text = response_text
+                            logger.info(
+                                f"✅ 전체 응답 수신 (길이: {len(response_text)})"
                             )
-                            await asyncio.sleep(0.05)  # 스트리밍 효과
+
+                            # 청크별로 나누어 전송 (의사 스트리밍)
+                            chunk_size = 50
+                            for i in range(0, len(response_text), chunk_size):
+                                # 클라이언트 연결 해제 확인
+                                if request and await request.is_disconnected():
+                                    logger.info(
+                                        "클라이언트 연결이 해제되어 폴백 스트리밍을 중단합니다."
+                                    )
+                                    break
+
+                                chunk_text = response_text[i : i + chunk_size]
+                                delta_event = {
+                                    "type": "content_block_delta",
+                                    "index": content_index,
+                                    "delta": {"type": "text_delta", "text": chunk_text},
+                                }
+                                yield self.sse_generator._format_event(
+                                    "chat_content_delta", delta_event
+                                )
+                                await asyncio.sleep(0.05)  # 스트리밍 효과
+                except Exception as fallback_error:
+                    logger.error(f"폴백 모드도 실패: {fallback_error}")
+                    error_text = (
+                        "죄송합니다. 일시적인 문제로 응답을 생성할 수 없습니다."
+                    )
+                    yield self.sse_generator._format_event(
+                        "chat_content_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": content_index,
+                            "delta": {"type": "text_delta", "text": error_text},
+                        },
+                    )
 
             # 7. 스트리밍 종료 및 후처리
             yield self.sse_generator._format_event(
@@ -661,6 +834,26 @@ class ChatService:
             )
             yield self.sse_generator._format_event("stream_end", {"type": "end"})
 
+        except asyncio.CancelledError:
+            logger.info("채팅 스트림 처리가 취소되었습니다.")
+            error_text = "요청이 취소되었습니다."
+            yield self.sse_generator._format_event(
+                "chat_content_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": content_index,
+                    "delta": {"type": "text_delta", "text": error_text},
+                },
+            )
+            yield self.sse_generator._format_event(
+                "chat_content_stop",
+                {"type": "content_block_stop", "index": content_index},
+            )
+            yield self.sse_generator._format_event(
+                "chat_message_delta",
+                {"type": "message_delta", "delta": {"stop_reason": "cancelled"}},
+            )
+            yield self.sse_generator._format_event("stream_end", {"type": "cancelled"})
         except Exception as e:
             logger.error(f"채팅 스트림 처리 중 치명적 오류 발생: {e}", exc_info=True)
             await db.rollback()
@@ -682,6 +875,14 @@ class ChatService:
                 {"type": "message_delta", "delta": {"stop_reason": "error"}},
             )
             yield self.sse_generator._format_event("stream_end", {"type": "error"})
+        finally:
+            # 클라이언트 연결 모니터링 작업 정리
+            if disconnect_monitor and not disconnect_monitor.done():
+                disconnect_monitor.cancel()
+                try:
+                    await disconnect_monitor
+                except asyncio.CancelledError:
+                    pass
 
     async def _stream_llm_with_heartbeat(
         self,

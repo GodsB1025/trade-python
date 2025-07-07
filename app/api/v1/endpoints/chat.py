@@ -111,7 +111,10 @@ async def handle_chat(
 
             # ChatService의 스트림을 그대로 전달 (HSCode 쿼리도 내부에서 처리)
             async for chunk in chat_service.stream_chat_response(
-                chat_request=chat_request, db=db, background_tasks=background_tasks
+                chat_request=chat_request,
+                db=db,
+                background_tasks=background_tasks,
+                request=request,
             ):
                 # 연결 상태 재확인
                 if await request.is_disconnected():
