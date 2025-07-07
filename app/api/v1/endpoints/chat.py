@@ -127,18 +127,48 @@ async def handle_chat(
 
                 # 실제 응답 내용 추출 및 누적
                 try:
+                    # 모든 청크에 대한 디버깅 로깅 추가
+                    logger.info(f"처리 중인 청크: {chunk[:200]}...")
+
                     # SSE 형식에서 data 부분 추출
                     if chunk.startswith("event: chat_content_delta\ndata: "):
                         data_part = chunk.split("data: ", 1)[1].split("\n\n")[0]
+                        logger.info(f"추출된 data 부분: {data_part}")
+
                         delta_data = json.loads(data_part)
 
-                        # delta에서 실제 텍스트 추출
+                        # 디버깅을 위한 delta_data 구조 로깅
+                        logger.info(f"delta_data 구조: {delta_data}")
+
+                        # delta에서 실제 텍스트 추출 (Context7 권장 방식)
                         if "delta" in delta_data and "text" in delta_data["delta"]:
                             text_content = delta_data["delta"]["text"]
                             accumulated_response += text_content
+                            logger.info(f"텍스트 추출 성공 (방법1): '{text_content}'")
+                        # LangChain astream_events v2 형식도 지원
+                        elif (
+                            "type" in delta_data
+                            and delta_data["type"] == "content_block_delta"
+                        ):
+                            delta_info = delta_data.get("delta", {})
+                            logger.info(f"v2 형식 감지, delta_info: {delta_info}")
+                            if (
+                                "type" in delta_info
+                                and delta_info["type"] == "text_delta"
+                            ):
+                                text_content = delta_info.get("text", "")
+                                accumulated_response += text_content
+                                logger.info(
+                                    f"텍스트 추출 성공 (방법2): '{text_content}'"
+                                )
+                        else:
+                            logger.warning(f"알 수 없는 delta_data 형식: {delta_data}")
 
-                except (json.JSONDecodeError, KeyError, IndexError):
-                    # JSON 파싱 실패하거나 예상된 구조가 아닌 경우는 무시
+                except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+                    # JSON 파싱 실패하거나 예상된 구조가 아닌 경우는 디버깅을 위해 로깅
+                    logger.info(
+                        f"텍스트 추출 실패 - chunk: {chunk[:200]}..., error: {e}"
+                    )
                     pass
 
                 # SSE 형식으로 청크 전송
@@ -153,9 +183,14 @@ async def handle_chat(
                 logger.info(f"사용자 ID: {chat_request.user_id}")
                 logger.info(f"세션 UUID: {chat_request.session_uuid}")
                 logger.info(f"응답 길이: {len(accumulated_response)}")
-                logger.info(
-                    f"응답 내용: {accumulated_response[:500]}..."
-                )  # 처음 500자만 로깅
+                if accumulated_response:
+                    logger.info(
+                        f"응답 내용: {accumulated_response[:500]}..."
+                    )  # 처음 500자만 로깅
+                else:
+                    logger.warning(
+                        "accumulated_response가 비어있음 - 텍스트 추출 로직 점검 필요"
+                    )
                 logger.info(f"====================")
 
         except asyncio.CancelledError:

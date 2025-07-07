@@ -31,44 +31,32 @@ class LLMProvider:
             )
 
         # 1. Anthropic API 공유 속도 제한기 생성
-        # 목적에 따라 속도 제한기를 분리하여 사용자 경험 보장
-        # - 채팅(실시간 응답): 더 높은 처리량 허용
-        # - 모니터링(백그라운드): 낮은 처리량으로 안정적 운영
-        chat_rate_limiter = InMemoryRateLimiter(
-            requests_per_second=2, check_every_n_seconds=0.1
-        )
-        monitoring_rate_limiter = InMemoryRateLimiter(
+        # Anthropic API의 분당 토큰 제한(TPM)을 고려하여 모든 모델의 요청 속도를 제어.
+        # 분당 출력 토큰 제한(16,000)을 기반으로 초당 요청 수를 계산함.
+        # - 북마크 1개당 최대 출력 토큰: ~2,300 (검색 결과 2,000 + 요약 300)
+        # - 분당 처리 가능 북마크: 16,000 / 2,300 ~= 6.9개. 안전 마진 적용 -> 6개/분
+        # - 분당 요청(RPM): 6개 북마크/분 * 2회 호출/북마크 = 12 RPM
+        # - 초당 요청(RPS): 12 RPM / 60초 = 0.2 RPS
+        anthropic_rate_limiter = InMemoryRateLimiter(
             requests_per_second=0.2, check_every_n_seconds=0.1
         )
 
-        # 2. 앤트로픽 챗 모델 초기화 (목적별 분리)
+        # 2. 앤트로픽 챗 모델 초기화
         # API 키를 명시적으로 전달하여 인증 문제 방지
-        default_anthropic_args = {
-            "api_key": SecretStr(settings.ANTHROPIC_API_KEY),
-            "temperature": 1,
-            "timeout": 600,
-            "max_retries": 2,
-            "stop": None,
-            "default_headers": {
+        base_llm = ChatAnthropic(
+            model_name=settings.ANTHROPIC_MODEL,
+            api_key=SecretStr(settings.ANTHROPIC_API_KEY),  # SecretStr로 변환하여 전달
+            temperature=1,
+            max_tokens_to_sample=12_000,
+            timeout=600,
+            max_retries=5,  # 재시도 횟수를 5회로 증가
+            stop=None,
+            default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
                 "anthropic-version": "2023-06-01",
             },
-        }
-
-        chat_base_llm = ChatAnthropic(
-            model_name=settings.ANTHROPIC_MODEL,
-            max_tokens_to_sample=12_000,
             thinking={"type": "enabled", "budget_tokens": 6_000},
-            rate_limiter=chat_rate_limiter,
-            **default_anthropic_args,
-        )
-
-        monitoring_base_llm = ChatAnthropic(
-            model_name=settings.ANTHROPIC_MODEL,
-            max_tokens_to_sample=4_000,  # 모니터링은 더 작은 출력으로 충분
-            thinking=None,  # 모니터링은 thinking 기능 불필요
-            rate_limiter=monitoring_rate_limiter,
-            **default_anthropic_args,
+            rate_limiter=anthropic_rate_limiter,  # 모든 모델에 공유 속도 제한기 적용
         )
 
         # 3. Anthropic 네이티브 웹 검색 도구 정의
@@ -128,20 +116,22 @@ class LLMProvider:
         # 4. 모델에 네이티브 웹 검색 기능 바인딩 -> 서비스 레이어에서 책임지도록 변경
         # 서비스 레이어에서 각 용도에 맞게 네이티브 도구(웹 검색)와 Pydantic 도구(구조화된 출력)를
         # 함께 바인딩해야 하므로, 프로바이더는 순수한 모델과 도구만 제공
-        self.base_llm = chat_base_llm  # 기본 LLM은 채팅용을 따름
-        self.news_llm_with_native_search = chat_base_llm.bind_tools(
+        self.base_llm = base_llm
+        self.news_llm_with_native_search = base_llm.bind_tools(
             tools=[self.news_web_search_tool]
         )
 
         # 5. 재시도 로직 정의
-        # 529 과부하 에러와 같은 특정 오류에 대해 지수 백오프를 사용한 재시도를 적용.
+        # Anthropic API의 일시적 오류에 대해 지수 백오프를 사용한 재시도를 적용.
         # 모든 모델에 일관되게 적용하여 안정성 확보.
         self.retry_config = {
-            "stop_after_attempt": 10,
+            "stop_after_attempt": 5,  # 재시도 횟수를 5회로 조정 (더 현실적인 값)
             "wait_exponential_jitter": True,  # 지수적으로 대기 시간 증가 (jitter 포함)
             "retry_if_exception_type": (
                 anthropic.InternalServerError,
                 anthropic.RateLimitError,
+                anthropic.APIStatusError,  # OverloadedError 포함
+                anthropic.APIConnectionError,  # 연결 문제도 재시도
             ),
         }
 
@@ -195,13 +185,13 @@ class LLMProvider:
             temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
             max_tokens_to_sample=14_000,
             timeout=300.0,  # timeout을 5분 (300초)으로 명시적으로 설정
-            max_retries=3,
+            max_retries=5,  # 재시도 횟수를 5회로 증가
             stop=None,
             default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
             },
-            thinking={"type": "enabled", "budget_tokens": 8_000},
-            rate_limiter=chat_rate_limiter,  # HSCode 분류는 대화형이므로 채팅 제한기 사용
+            thinking={"type": "enabled", "budget_tokens": 14_000},
+            rate_limiter=anthropic_rate_limiter,
         )
 
         # HSCode 분류용 모델에 웹 검색 도구 바인딩
@@ -211,13 +201,21 @@ class LLMProvider:
 
         # 7. 용도별 LLM 모델 최종 생성
         # 모든 모델에 재시도 로직을 적용하여 안정성 강화
-        self.news_chat_model = (
-            self.news_llm_with_native_search | StrOutputParser()
-        ).with_retry(**self.retry_config)
-        self.monitoring_chat_model = monitoring_base_llm.with_retry(**self.retry_config)
-        self.hscode_chat_model = (
-            self.hscode_llm_with_web_search | StrOutputParser()
-        ).with_retry(**self.retry_config)
+        self.news_chat_model = self.news_llm_with_native_search.with_retry(
+            **self.retry_config
+        )
+        self.monitoring_chat_model = self.base_llm.with_retry(**self.retry_config)
+        self.hscode_chat_model = self.hscode_base_llm.with_retry(**self.retry_config)
+
+        # 하위 호환성을 위해 news_llm_with_native_search도 동일하게 retry가 적용된 모델을 참조하도록 함
+        self.news_llm_with_native_search = self.news_chat_model
+
+        self.hscode_llm_with_web_search = self.hscode_llm_with_web_search.with_retry(
+            **self.retry_config
+        )
+
+        # monitoring_llm_with_native_search는 서비스 레이어에서 직접 생성하도록 책임을 위임함.
+        # self.monitoring_llm_with_native_search = monitoring_model_with_tools_bound
 
         # 7. Voyage AI 임베딩 모델 초기화
         if not settings.VOYAGE_API_KEY:
