@@ -178,28 +178,20 @@ async def create_update_feed(
 
 
 class CRUDChat:
-    async def get_or_create_session(
-        self, db: AsyncSession, user_id: int, session_uuid_str: Optional[str] = None
+    async def get_session_by_uuid(
+        self, db: AsyncSession, user_id: int, session_uuid_str: str
     ) -> db_models.ChatSession:
         """
-        주어진 session_uuid로 채팅 세션을 찾거나, 없으면 새로 생성.
-        Java에서 생성한 session_uuid를 그대로 사용함.
-        트랜잭션 충돌 상황도 처리함.
-        - session_uuid_str (str): Java에서 받은 문자열 UUID.
+        주어진 user_id와 session_uuid로 채팅 세션을 조회합니다.
+        세션은 Spring Boot에 의해 생성되므로, 항상 존재한다고 가정합니다.
+        세션이 존재하지 않으면 오류를 발생시킵니다.
         """
-        from sqlalchemy.exc import IntegrityError
-        import logging
-
-        logger = logging.getLogger(__name__)
-
         if not session_uuid_str:
-            raise ValueError(
-                "session_uuid는 필수입니다. Java에서 생성한 session_uuid를 제공해야 합니다."
-            )
+            raise ValueError("session_uuid는 필수입니다.")
 
         try:
             session_uuid = UUID(session_uuid_str)
-        except ValueError:
+        except (ValueError, TypeError):
             raise ValueError(f"유효하지 않은 UUID 형식입니다: {session_uuid_str}")
 
         # 기존 세션이 있는지 확인
@@ -212,43 +204,15 @@ class CRUDChat:
             .options(selectinload(db_models.ChatSession.messages))
         )
         result = await db.execute(query)
-        session_to_load = result.scalars().first()
+        session = result.scalars().first()
 
-        if session_to_load:
-            return session_to_load
-
-        # 세션이 없으면 Java에서 받은 UUID로 새 세션 생성
-        new_session = db_models.ChatSession(session_uuid=session_uuid, user_id=user_id)
-        db.add(new_session)
-
-        try:
-            await db.flush()
-            await db.refresh(new_session)
-            return new_session
-        except IntegrityError as e:
-            # UUID 충돌 등의 예외 발생 시 세션 조회 재시도
-            # (Java에서 같은 UUID로 세션을 생성하고 커밋했을 가능성)
-            logger.warning(
-                f"세션 생성 중 IntegrityError 발생: {session_uuid}. Java에서 이미 생성했을 가능성으로 재조회 시도."
+        if not session:
+            # Spring Boot에서 세션을 생성하므로, 존재하지 않는 경우는 예외적인 상황
+            raise ValueError(
+                f"세션을 찾을 수 없습니다: user_id={user_id}, session_uuid={session_uuid_str}"
             )
 
-            # 세션에서 추가한 객체 제거
-            db.expunge(new_session)
-
-            # 다시 한번 기존 세션 조회 시도
-            result = await db.execute(query)
-            session_to_load = result.scalars().first()
-
-            if session_to_load:
-                logger.info(f"재조회 성공: 기존 세션 반환 {session_uuid}")
-                return session_to_load
-            else:
-                logger.error(f"재조회 실패: 세션이 여전히 존재하지 않음 {session_uuid}")
-                raise e
-        except Exception as e:
-            # IntegrityError가 아닌 다른 예외는 그대로 발생
-            logger.error(f"세션 생성 중 예기치 않은 오류: {e}")
-            raise e
+        return session
 
     async def get_messages_by_session(
         self, db: AsyncSession, session_uuid: UUID

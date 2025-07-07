@@ -412,9 +412,12 @@ class ChatSession(ChatSessionBase):
 class DetailButton(BaseModel):
     """상세페이지 버튼 정보"""
 
-    type: Literal["HS_CODE", "REGULATION", "STATISTICS"]
+    type: Literal["link", "action"]
     label: str = Field(..., description="버튼 레이블")
-    url: str = Field(..., description="버튼 URL")
+    url: Optional[str] = Field(None, description="버튼 URL (type이 link일 경우)")
+    action: Optional[str] = Field(
+        None, description="버튼 클릭 시 수행될 액션 (type이 action일 경우)"
+    )
     query_params: Optional[Dict[str, str]] = Field(
         default=None, description="쿼리 파라미터"
     )
@@ -429,8 +432,11 @@ class DetailPageInfo(BaseModel):
     detail_buttons: List[DetailButton] = Field(default_factory=list)
     processing_time_ms: int = Field(default=0)
     confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    analysis_source: Literal["fallback", "cache", "web_search"] = Field(
-        default="fallback"
+    analysis_source: Literal[
+        "fallback", "cache", "web_search", "pre_analyzed", "skipped", "error"
+    ] = Field(default="fallback")
+    error_message: Optional[str] = Field(
+        default=None, description="오류 발생 시 메시지"
     )
 
 

@@ -34,22 +34,19 @@ class ParallelTaskManager:
         chat_request: ChatRequest,
         db: AsyncSession,
         background_tasks: BackgroundTasks,
+        override_hscode: Optional[str] = None,
+        override_product_name: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """3단계 병렬 처리 실행"""
-
-        # 즉시 병렬 처리 시작 이벤트 전송
-        yield self.sse_generator.generate_thinking_event(
-            "parallel_processing_start",
-            "3단계 병렬 처리를 시작합니다: 자연어 응답, 상세페이지 준비, 회원 기록 저장",
-            15,
-        )
 
         # 상세페이지 버튼 준비 시작 이벤트 (웹 검색 수행 포함)
         yield self.sse_generator.generate_detail_buttons_start_event(3)
 
         # 작업 B: 상세페이지 정보 준비를 백그라운드에서 실행 (실제 웹 검색 포함)
         detail_page_task = asyncio.create_task(
-            self._execute_detail_page_preparation(chat_request, db)
+            self._execute_detail_page_preparation(
+                chat_request, db, override_hscode, override_product_name
+            )
         )
 
         # 작업 C: 채팅 저장을 백그라운드에서 실행 (시뮬레이션)
@@ -88,15 +85,21 @@ class ParallelTaskManager:
             logger.error(f"채팅 저장 중 오류: {e}")
 
     async def _execute_detail_page_preparation(
-        self, chat_request: ChatRequest, db: AsyncSession
+        self,
+        chat_request: ChatRequest,
+        db: AsyncSession,
+        override_hscode: Optional[str] = None,
+        override_product_name: Optional[str] = None,
     ) -> DetailPageInfo:
         """작업 B: 상세페이지 정보 준비"""
         try:
             detail_info = await self.detail_page_service.prepare_detail_page_info(
-                chat_request.message,  # ChatRequest에서는 message 필드 사용
-                chat_request.session_uuid or "",
-                chat_request.user_id,
-                db,  # DB 세션 전달
+                message=chat_request.message,
+                session_uuid=chat_request.session_uuid or "",
+                user_id=chat_request.user_id,
+                db=db,
+                override_hscode=override_hscode,
+                product_name=override_product_name,
             )
             logger.info(f"상세페이지 정보 준비 완료: {detail_info.analysis_source}")
             return detail_info

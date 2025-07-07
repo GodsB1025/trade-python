@@ -1,75 +1,70 @@
-# SSE 이벤트 매핑 가이드 (v2.1)
+# SSE 이벤트 매핑 가이드 (v4.0)
 
 ## 📋 개요
 
-무역 규제 레이더 플랫폼의 `/chat` 엔드포인트에서 발생하는 모든 SSE(Server-Sent Events) 이벤트의 표준화된 매핑 정보와 상세 데이터 구조를 제공합니다.
+무역 규제 레이더 플랫폼의 `/chat` 엔드포인트에서 발생하는 모든 SSE(Server-Sent Events) 이벤트의 표준화된 매핑 정보와 상세 데이터 구조를 제공합니다. 이 문서는 백엔드 구현과 100% 일치하는 최신 정보를 담고 있습니다.
 
-**개선 일자**: 2025-07-06  
-**버전**: v2.1 (웹 검색 결과 분리 버전)
+**개선 일자**: 2025-07-09
+**버전**: v4.0 (AI 사고 과정 투명성 강화)
 
-**주요 내용:**
-- 📊 이벤트 매핑 테이블 (간략 구조)
-- 🔍 상세 데이터 구조 (실제 JSON 예시)
-- 📱 프론트엔드 구현 가이드
-- 🛠️ 디버깅 및 체크리스트
+**주요 변경 사항 (v4.0):**
+- **AI 사고 과정 이벤트 추가**: AI가 도구를 사용하는 과정(`tool_use`)과 그 결과(`tool_result`)를 클라이언트에 실시간으로 전달하는 이벤트를 추가하여 전체 프로세스의 투명성을 강화함.
+- **`chat_web_search_results` 이벤트 대체**: 기존의 `chat_web_search_results` 이벤트를 더 일반적이고 구조적인 `tool_use` 및 `tool_result` 이벤트로 대체함.
+- **이벤트 플로우 다이어그램 개정**: 새로운 `tool_use`, `tool_result` 이벤트 흐름을 다이어그램에 정확히 반영함.
+- **프론트엔드 가이드 업데이트**: 새로운 이벤트들을 처리하기 위한 핸들러와 React 훅 예제를 최신화함.
 
 ## 🎯 개선 목표
 
-- **파싱 단순화**: 이벤트 타입을 `data` 내부가 아닌 `event:` 필드로 직접 식별
-- **일관된 네이밍**: 도메인별 일관된 접두사 사용 (`chat_*`, `parallel_*`, `detail_*`)
-- **프론트엔드 친화적**: 명확한 이벤트 핸들러 구조 지원
-- **SSE 표준 준수**: W3C SSE 표준에 맞는 이벤트 구조
-- **데이터 분리**: 메인 텍스트와 웹 검색 결과를 별도 이벤트로 분리하여 파싱 최적화
+- **AI 동작 투명성**: AI가 어떤 도구를, 왜, 어떻게 사용하는지 사용자가 명확히 인지할 수 있도록 함.
+- **구현 일치성**: 실제 백엔드 코드의 이벤트 흐름과 100% 일치하도록 문서 개정.
+- **확장성**: 향후 웹 검색 외 다른 도구가 추가되더라도 동일한 이벤트 구조를 재사용할 수 있도록 설계.
+- **프론트엔드 친화적**: 명확하고 상세한 이벤트 핸들러 구조 지원.
 
 ## 📊 이벤트 매핑 테이블
 
-### 1. 채팅 관련 이벤트
+### 1. 핵심 채팅 이벤트
 
-| **이벤트명**              | **설명**             | **발생 시점**         | **데이터 구조 (간략)**                                |
-| ------------------------- | -------------------- | --------------------- | ----------------------------------------------------- |
-| `chat_session_info`       | 세션 정보 전송       | 최초 연결 시          | `{session_uuid, timestamp}`                           |
-| `chat_message_start`      | AI 메시지 시작       | 응답 생성 시작        | `{type: "message_start", message: {...}}`             |
-| `chat_metadata_start`     | 메타데이터 블록 시작 | 새 세션인 경우        | `{type: "content_block_start", content_block: {...}}` |
-| `chat_metadata_stop`      | 메타데이터 블록 종료 | 메타데이터 전송 완료  | `{type: "content_block_stop", ...}`                   |
-| `chat_content_start`      | 텍스트 블록 시작     | 실제 텍스트 시작 전   | `{type: "content_block_start", content_block: {...}}` |
-| `chat_content_delta`      | 텍스트 스트리밍      | 텍스트 생성 중 (연속) | `{type: "content_block_delta", delta: {text: "..."}}` |
-| `chat_web_search_results` | 웹 검색 결과         | HSCode 분류 시        | `{type, results, timestamp, total_count}`             |
-| `chat_content_stop`       | 텍스트 블록 종료     | 텍스트 생성 완료      | `{type: "content_block_stop", ...}`                   |
-| `chat_message_delta`      | 메시지 메타데이터    | 메시지 종료 전        | `{type: "message_delta", delta: {stop_reason}}`       |
-| `chat_message_limit`      | 메시지 제한 정보     | 메시지 완료 시        | `{type: "message_limit", message_limit: {...}}`       |
-| `chat_message_stop`       | 메시지 종료          | 전체 응답 완료        | `{type: "message_stop"}`                              |
+| **이벤트명**          | **설명**                             | **발생 시점**         | **데이터 구조 (간략)**                                                  |
+| --------------------- | ------------------------------------ | --------------------- | ----------------------------------------------------------------------- |
+| `chat_session_info`   | 세션 정보 전송                       | 최초 연결 시          | `{session_uuid, timestamp}`                                             |
+| `chat_message_start`  | AI 메시지 시작                       | 응답 생성 시작        | `{type: "message_start", message: {...}}`                               |
+| `chat_metadata_start` | 메타데이터 블록 시작 (**새 세션만**) | 새 세션인 경우        | `{type: "content_block_start", content_block: {type: "metadata", ...}}` |
+| `chat_metadata_stop`  | 메타데이터 블록 종료 (**새 세션만**) | 메타데이터 전송 완료  | `{type: "content_block_stop", ...}`                                     |
+| `chat_content_start`  | 텍스트 블록 시작                     | 실제 텍스트 시작 전   | `{type: "content_block_start", content_block: {type: "text", ...}}`     |
+| `chat_content_delta`  | 텍스트 스트리밍                      | 텍스트 생성 중 (연속) | `{type: "content_block_delta", delta: {text: "..."}}`                   |
+| `chat_content_stop`   | 텍스트 블록 종료                     | 텍스트 생성 완료      | `{type: "content_block_stop", ...}`                                     |
+| `chat_message_delta`  | 메시지 메타데이터                    | 메시지 종료 전        | `{type: "message_delta", delta: {stop_reason}}`                         |
+| `chat_message_limit`  | 메시지 제한 정보 (현재 미사용)       | 메시지 완료 시        | `{type: "message_limit", message_limit: {...}}`                         |
+| `chat_message_stop`   | 메시지 종료                          | 전체 응답 완료        | `{type: "message_stop"}`                                                |
 
-### 2. 병렬 처리 이벤트
+### 2. AI 사고 및 도구 사용 이벤트 (신규)
 
-| **이벤트명**          | **설명**       | **발생 시점** | **데이터 구조**                         |
-| --------------------- | -------------- | ------------- | --------------------------------------- |
-| `parallel_processing` | 병렬 작업 상태 | 병렬 처리 중  | `{stage, content, progress, timestamp}` |
+| **이벤트명**  | **설명**                          | **발생 시점**                | **데이터 구조 (간략)**                            |
+| ------------- | --------------------------------- | ---------------------------- | ------------------------------------------------- |
+| `tool_use`    | AI의 도구 사용 시작 알림          | AI가 도구 호출을 결정한 직후 | `{type, tool_use_id, tool_name, tool_input, ...}` |
+| `tool_result` | AI가 사용한 도구의 실행 결과 전달 | 내부 도구 실행 완료 후       | `{type, tool_use_id, tool_name, content, ...}`    |
 
-**stage 값:**
-- `parallel_processing_start`: 병렬 처리 시작
-- `parallel_processing_progress`: 진행 상황 업데이트
-- `parallel_processing_complete`: 병렬 처리 완료
+### 3. 처리 상태 이벤트
 
-### 3. 상세페이지 버튼 이벤트
+| **이벤트명**        | **설명**                   | **발생 시점**    | **데이터 구조 (간략)**                             |
+| ------------------- | -------------------------- | ---------------- | -------------------------------------------------- |
+| `processing_status` | 서버의 현재 작업 상태 알림 | 작업 단계별 시작 | `{id, type, message, progress, current_step, ...}` |
 
-| **이벤트명**              | **설명**            | **발생 시점**        | **데이터 구조**                                               |
-| ------------------------- | ------------------- | -------------------- | ------------------------------------------------------------- |
-| `detail_buttons_start`    | 버튼 준비 시작      | 상세페이지 분석 시작 | `{type: "start", buttonsCount, estimatedPreparationTime}`     |
-| `detail_button_ready`     | 개별 버튼 준비 완료 | 각 버튼 준비 완료 시 | `{type: "button", buttonType, url, title, metadata}`          |
-| `detail_buttons_complete` | 모든 버튼 준비 완료 | 버튼 생성 완료       | `{type: "complete", totalPreparationTime, buttonsGenerated}`  |
-| `detail_buttons_error`    | 버튼 준비 오류      | 에러 발생 시         | `{type: "error", errorCode, errorMessage, fallbackActivated}` |
+### 4. 상세페이지 버튼 이벤트 (**HSCode 분류 시**)
 
-### 4. 연결 유지 이벤트
-
-| **이벤트명** | **설명**       | **발생 시점**     | **데이터 구조**             |
-| ------------ | -------------- | ----------------- | --------------------------- |
-| `heartbeat`  | 연결 상태 확인 | 주기적 (30초마다) | `{session_uuid, timestamp}` |
+| **이벤트명**              | **설명**                       | **발생 시점**        | **데이터 구조 (간략)**    |
+| ------------------------- | ------------------------------ | -------------------- | ------------------------- |
+| `detail_buttons_start`    | 버튼 준비 시작                 | 상세페이지 분석 시작 | `{type: "start", ...}`    |
+| `detail_button_ready`     | 개별 버튼 준비 완료            | 각 버튼 준비 완료 시 | `{type: "button", ...}`   |
+| `detail_buttons_complete` | 모든 버튼 준비 완료            | 버튼 생성 완료       | `{type: "complete", ...}` |
+| `detail_buttons_error`    | 버튼 준비 오류 (타임아웃 포함) | 에러 발생 시         | `{type: "error"           | "timeout", ...}` |
 
 ---
 
-## 🔍 상세 데이터 구조
+## 🔍 상세 데이터 구조 (v4.0 - 실제 구현 기반)
 
 ### 1. 핵심 채팅 이벤트
+(이전과 동일: `chat_session_info` ~ `chat_content_delta`)
 
 #### `chat_session_info`
 ```json
@@ -97,13 +92,38 @@
 }
 ```
 
+#### `chat_metadata_start` (새 세션만)
+```json
+{
+    "type": "content_block_start",
+    "index": 0,
+    "content_block": {
+        "start_timestamp": "2025-07-08T10:00:00.123456Z",
+        "stop_timestamp": null,
+        "type": "metadata",
+        "metadata": {
+            "session_uuid": "db9b08dc-a8aa-46e1-ba19-2b452a1851fb"
+        }
+    }
+}
+```
+
+#### `chat_metadata_stop` (새 세션만)
+```json
+{
+    "type": "content_block_stop",
+    "index": 0,
+    "stop_timestamp": "2025-07-08T10:00:00.234567Z"
+}
+```
+
 #### `chat_content_start`
 ```json
 {
   "type": "content_block_start",
-  "index": 0,
+  "index": 1,
   "content_block": {
-    "start_timestamp": "2025-07-06T15:54:46.511229Z",
+    "start_timestamp": "2025-07-08T10:00:00.345678Z",
     "stop_timestamp": null,
     "type": "text",
     "text": "",
@@ -116,7 +136,7 @@
 ```json
 {
   "type": "content_block_delta",
-  "index": 0,
+  "index": 1,
   "delta": {
     "type": "text_delta",
     "text": "안녕하세요! HS코드 분류를 도와드리겠습니다."
@@ -124,51 +144,53 @@
 }
 ```
 
-#### `chat_web_search_results`
+### 2. AI 사고 및 도구 사용 이벤트 (신규)
+
+#### `tool_use`
 ```json
 {
-  "type": "web_search_results",
-  "timestamp": "2025-07-06T15:54:46.634438Z",
-  "total_count": 3,
-  "results": [
-    {
-      "type": "web_search_result",
-      "title": "관세법령정보포털 CLIP",
-      "url": "https://unipass.customs.go.kr/clip/index.do?opnurl=/hsinfosrch/openULS0201001Q.do",
-      "content": "ErsBCioIBRgCIiQ5MTg3YmI5My0xYzM2LTQ1NjQtOWY0Zi04MzI3MjJjMjZkYzI...",
-      "page_age": null,
-      "metadata": {
-        "source": "anthropic_web_search",
-        "confidence": 0.8
-      }
+    "type": "tool_use",
+    "tool_use_id": "toolu_01A09q90qw90lq917835lq9",
+    "tool_name": "web_search",
+    "tool_input": {
+        "query": "냉동피자 HSCode 분류 사례"
     },
-    {
-      "type": "web_search_result", 
-      "title": "관세율표-부류목록 | HS정보 | 세계HS | 관세법령정보포털",
-      "url": "https://unipass.customs.go.kr/clip/index.do?opnurl=/hsinfosrch/openULS0201002Q.do",
-      "content": "ErsBCioIBRgCIiQ5MTg3YmI5My0xYzM2LTQ1NjQtOWY0Zi04MzI3MjJjMjZkYzI...",
-      "page_age": null,
-      "metadata": {
-        "source": "anthropic_web_search",
-        "confidence": 0.8
-      }
-    }
-  ]
+    "timestamp": "2025-07-09T11:00:01.500Z"
 }
 ```
+**설명**: AI가 특정 작업을 처리하기 위해 `web_search`라는 도구를 사용하기 시작했음을 알립니다. 프론트엔드는 이 이벤트를 받아 "웹 검색 중..."과 같은 메시지를 사용자에게 보여줄 수 있습니다. `tool_use_id`는 이후 `tool_result` 이벤트와 매칭하는 데 사용됩니다.
+
+#### `tool_result`
+```json
+{
+    "type": "tool_result",
+    "tool_use_id": "toolu_01A09q90qw90lq917835lq9",
+    "tool_name": "web_search",
+    "content": [
+        {
+            "type": "web_search_result",
+            "title": "관세법령정보포털 CLIP - 냉동 피자",
+            "url": "https://unipass.customs.go.kr/clip/...",
+            "content": "냉동 피자는 일반적으로 제1905호에 분류됩니다...",
+            "page_age": null,
+            "metadata": { ... }
+        }
+    ],
+    "timestamp": "2025-07-09T11:00:03.250Z"
+}
+```
+**설명**: `tool_use` 이벤트에 대한 실행 결과를 담고 있습니다. 프론트엔드는 이 결과를 직접 표시하거나, AI가 이 결과를 바탕으로 최종 답변을 생성하는 동안 대기 상태를 유지할 수 있습니다.
+
+---
+
+(이하 `chat_content_stop`부터 나머지 이벤트 구조는 이전과 거의 동일)
 
 #### `chat_content_stop`
 ```json
 {
   "type": "content_block_stop",
-  "index": 0,
-  "content_block": {
-    "start_timestamp": "2025-07-06T15:54:46.511229Z",
-    "stop_timestamp": "2025-07-06T15:54:47.123456Z",
-    "type": "text",
-    "text": "완성된 전체 텍스트 내용",
-    "citations": []
-  }
+  "index": 1,
+  "stop_timestamp": "2025-07-08T10:00:02.567890Z"
 }
 ```
 
@@ -186,12 +208,13 @@
 #### `chat_message_limit`
 ```json
 {
-  "type": "message_limit",
-  "message_limit": {
-    "type": "within_limit",
-    "remaining": 45,
-    "total": 50
-  }
+    "type": "message_limit",
+    "message_limit": {
+        "type": "within_limit",
+        "resetsAt": null,
+        "remaining": null,
+        "perModelLimit": null
+    }
 }
 ```
 
@@ -202,450 +225,104 @@
 }
 ```
 
-#### `chat_metadata_start` (새 세션만)
+### 2. 처리 상태 이벤트
+
+#### `processing_status` (실제 구조)
 ```json
 {
-  "type": "content_block_start",
-  "index": 0,
-  "content_block": {
-    "start_timestamp": "2025-07-06T15:54:46.511229Z",
-    "stop_timestamp": null,
-    "type": "text",
-    "text": "",
-    "citations": []
-  }
+  "id": "status-a1b2c3d4",
+  "type": "processing_status",
+  "message": "관련 규정 및 최신 정보 검색 중...",
+  "progress": 60,
+  "current_step": 3,
+  "total_steps": 5,
+  "timestamp": "2025-07-08T10:00:01.123456Z"
 }
 ```
+**설명:** 서버가 현재 수행 중인 작업을 사용자 친화적인 메시지로 전달합니다. 프론트엔드에서는 이 정보를 사용하여 로딩 스피너나 진행률 표시줄과 함께 현재 상태를 보여줄 수 있습니다.
 
-#### `chat_metadata_stop` (새 세션만)
-```json
-{
-  "type": "content_block_stop",
-  "index": 0,
-  "content_block": {
-    "start_timestamp": "2025-07-06T15:54:46.511229Z",
-    "stop_timestamp": "2025-07-06T15:54:46.612345Z",
-    "type": "text",
-    "text": "새 세션이 시작되었습니다.",
-    "citations": []
-  }
-}
-```
-
-### 2. 병렬 처리 이벤트
-
-#### `parallel_processing`
-
-**시작 단계:**
-```json
-{
-  "stage": "parallel_processing_start",
-  "content": "3단계 병렬 처리를 시작합니다: 자연어 응답, 상세페이지 준비, 회원 기록 저장",
-  "progress": 15,
-  "timestamp": "2025-07-06T15:54:46.634438Z"
-}
-```
-
-**진행 단계:**
-```json
-{
-  "stage": "parallel_processing_progress",
-  "content": "HSCode 분류 및 상세정보 조회 중...",
-  "progress": 65,
-  "timestamp": "2025-07-06T15:54:47.123456Z"
-}
-```
-
-**완료 단계:**
-```json
-{
-  "stage": "parallel_processing_complete",
-  "content": "모든 병렬 처리가 완료되었습니다.",
-  "progress": 100,
-  "timestamp": "2025-07-06T15:54:47.789012Z"
-}
-```
-
-### 3. 상세페이지 관련 이벤트
+### 3. 상세페이지 관련 이벤트 (실제 구조)
 
 #### `detail_buttons_start`
 ```json
 {
-  "type": "detail_buttons_start",
-  "timestamp": "2025-07-06T15:54:47.123456Z",
-  "estimated_count": 2
+    "type": "start",
+    "buttonsCount": 3,
+    "estimatedPreparationTime": 5000,
+    "timestamp": "2025-07-08T10:00:01.234567Z",
+    "processingInfo": {
+        "fallback_available": true,
+        "cache_checked": true,
+        "web_search_enabled": true
+    }
 }
 ```
 
 #### `detail_button_ready`
 ```json
 {
-  "type": "detail_button_ready",
-  "button": {
-    "id": "hs_code_detail_123",
-    "text": "HS코드 8471.30.1000 상세정보",
-    "category": "HS_CODE",
-    "url": "/detail/hscode/8471.30.1000",
+    "type": "button",
+    "buttonType": "HS_CODE",
+    "priority": 1,
+    "url": "/details/hscode/8471.30.0000",
+    "title": "HSCode 8471.30.0000 상세정보",
+    "description": "관세율, 규제정보 등 상세 조회",
+    "isReady": true,
     "metadata": {
-      "hscode": "8471.30.1000",
-      "description": "휴대용 자동자료처리기계"
+        "hscode": "8471.30.0000",
+        "confidence": 0.95,
+        "source": "model_classification",
+        "query_params": { "country": "KR" }
+    },
+    "actionData": {
+        "queryParams": { "country": "KR" },
+        "analytics": {
+            "click_tracking": true,
+            "conversion_target": "hs_code_detail_view"
+        }
     }
-  },
-  "button_index": 0,
-  "timestamp": "2025-07-06T15:54:47.234567Z"
 }
 ```
 
 #### `detail_buttons_complete`
 ```json
 {
-  "type": "detail_buttons_complete",
-  "total_buttons": 2,
-  "timestamp": "2025-07-06T15:54:47.345678Z"
-}
-```
-
-#### `detail_buttons_error`
-```json
-{
-  "type": "detail_buttons_error",
-  "error": {
-    "code": "EXTERNAL_API_TIMEOUT",
-    "message": "상세페이지 정보 조회 시간이 초과되었습니다.",
-    "details": "관세청 API 응답 시간 초과"
-  },
-  "fallback_activated": true,
-  "timestamp": "2025-07-06T15:54:47.456789Z"
-}
-```
-
-### 4. 연결 유지 이벤트
-
-#### `heartbeat`
-```json
-{
-  "session_uuid": "db9b08dc-a8aa-46e1-ba19-2b452a1851fb",
-  "timestamp": 42720.5639276
-}
-```
-
-**설명:** 클라이언트와의 연결 상태를 주기적으로 확인하기 위해 전송되는 이벤트입니다. 일반적으로 30초마다 전송되며, 네트워크 지연이나 프록시 타임아웃을 방지합니다.
-
-## 🔄 개선 전후 비교
-
-### Before (v1.0 - 문제점)
-
-```javascript
-// 모든 이벤트가 기본 'message' 타입으로 전송
-eventSource.addEventListener('message', (event) => {
-  const data = JSON.parse(event.data);
-  
-  // data 내부 type 필드로 구분해야 함
-  if (data.type === 'content_block_delta') {
-    appendText(data.delta.text);
-  } else if (data.stage === 'parallel_processing_start') {
-    updateProgress(data.progress);
-  } else if (data.type === 'button') {
-    addButton(data);
-  }
-  // 복잡한 분기 처리 필요
-});
-```
-
-**문제점:**
-- 모든 이벤트를 `message` 타입으로 받아야 함
-- `data` 내부 필드로 이벤트 타입 구분
-- 복잡한 조건문 필요
-- 이벤트 타입 오타 발생 가능성
-- 브라우저 개발자 도구에서 디버깅 어려움
-
-### After (v2.0 - 해결됨)
-
-```javascript
-// 명확한 이벤트 타입별 핸들러
-eventSource.addEventListener('chat_content_delta', (event) => {
-  const data = JSON.parse(event.data);
-  appendText(data.delta.text);
-});
-
-eventSource.addEventListener('parallel_processing', (event) => {
-  const data = JSON.parse(event.data);
-  updateProgress(data.progress, data.content);
-});
-
-eventSource.addEventListener('detail_button_ready', (event) => {
-  const button = JSON.parse(event.data);
-  addButton(button);
-});
-```
-
-### After (v2.1 - 웹 검색 결과 분리)
-
-```javascript
-// 메인 텍스트 (순수 AI 응답만)
-eventSource.addEventListener('chat_content_delta', (event) => {
-  const data = JSON.parse(event.data);
-  appendText(data.delta.text); // JSON 없는 순수 텍스트
-});
-
-// 웹 검색 결과 (구조화된 데이터)
-eventSource.addEventListener('chat_web_search_results', (event) => {
-  const data = JSON.parse(event.data);
-  displaySearchResults(data.results); // 별도 UI 컴포넌트로 표시
-});
-
-eventSource.addEventListener('parallel_processing', (event) => {
-  const data = JSON.parse(event.data);
-  updateProgress(data.progress, data.content);
-});
-
-eventSource.addEventListener('detail_button_ready', (event) => {
-  const button = JSON.parse(event.data);
-  addButton(button);
-});
-```
-
-**v2.1 추가 장점:**
-- 메인 텍스트와 웹 검색 결과 완전 분리
-- JSON 파싱 오류 없는 안정적인 텍스트 스트리밍
-- 웹 검색 결과의 구조화된 메타데이터 활용 가능
-- 프론트엔드에서 개별 UI 컴포넌트로 최적화된 표시
-
-## 📱 프론트엔드 구현 가이드
-
-### 1. 기본 EventSource 설정
-
-```javascript
-const eventSource = new EventSource('/api/v1/chat', {
-  withCredentials: true
-});
-
-// 연결 상태 관리
-eventSource.onopen = () => {
-  console.log('SSE 연결 성공');
-};
-
-eventSource.onerror = (error) => {
-  console.error('SSE 연결 오류:', error);
-};
-```
-
-### 2. 이벤트 핸들러 등록
-
-```javascript
-// 연결 상태 확인
-eventSource.addEventListener('heartbeat', (event) => {
-  const heartbeatData = JSON.parse(event.data);
-  console.log('연결 유지:', heartbeatData.timestamp);
-  
-  // 연결 상태 UI 업데이트 (선택사항)
-  updateConnectionStatus('connected');
-});
-
-// 세션 정보 처리
-eventSource.addEventListener('chat_session_info', (event) => {
-  const sessionInfo = JSON.parse(event.data);
-  console.log('세션 UUID:', sessionInfo.session_uuid);
-  
-  // 세션 정보 저장
-  localStorage.setItem('session_uuid', sessionInfo.session_uuid);
-});
-
-// 메시지 시작
-eventSource.addEventListener('chat_message_start', (event) => {
-  const messageData = JSON.parse(event.data);
-  console.log('메시지 시작:', messageData.message.id);
-  
-  // UI 초기화
-  clearCurrentMessage();
-  showTypingIndicator();
-});
-
-// 텍스트 스트리밍
-eventSource.addEventListener('chat_content_delta', (event) => {
-  const deltaData = JSON.parse(event.data);
-  const text = deltaData.delta.text;
-  
-  // 실시간 텍스트 추가 (순수 텍스트만, JSON 없음)
-  appendTextToCurrentMessage(text);
-});
-
-// 웹 검색 결과 처리 (HSCode 분류 시)
-eventSource.addEventListener('chat_web_search_results', (event) => {
-  const searchData = JSON.parse(event.data);
-  
-  // 웹 검색 결과를 별도 UI 영역에 표시
-  displayWebSearchResults({
-    results: searchData.results,
-    totalCount: searchData.total_count,
-    timestamp: searchData.timestamp
-  });
-});
-
-// 병렬 처리 상태
-eventSource.addEventListener('parallel_processing', (event) => {
-  const processData = JSON.parse(event.data);
-  
-  // 진행률 업데이트
-  updateProgressBar(processData.progress);
-  showProcessMessage(processData.content);
-});
-
-// 상세 버튼 준비
-eventSource.addEventListener('detail_button_ready', (event) => {
-  const buttonData = JSON.parse(event.data);
-  
-  // 버튼 UI 생성
-  createDetailButton({
-    type: buttonData.buttonType,
-    title: buttonData.title,
-    url: buttonData.url,
-    description: buttonData.description
-  });
-});
-
-// 메시지 완료
-eventSource.addEventListener('chat_message_stop', (event) => {
-  console.log('메시지 완료');
-  
-  // UI 정리
-  hideTypingIndicator();
-  enableInputField();
-});
-```
-
-### 3. React/Vue.js 컴포넌트 예시
-
-#### React 훅 예시
-
-```javascript
-import { useEffect, useState } from 'react';
-
-export function useChatSSE(chatEndpoint) {
-  const [messages, setMessages] = useState([]);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [currentMessage, setCurrentMessage] = useState('');
-  const [sessionUuid, setSessionUuid] = useState(null);
-  const [webSearchResults, setWebSearchResults] = useState([]);
-
-  useEffect(() => {
-    const eventSource = new EventSource(chatEndpoint);
-
-    // 연결 상태 확인
-    eventSource.addEventListener('heartbeat', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('연결 유지:', data.timestamp);
-    });
-
-    // 세션 정보
-    eventSource.addEventListener('chat_session_info', (event) => {
-      const data = JSON.parse(event.data);
-      setSessionUuid(data.session_uuid);
-    });
-
-    // 메시지 시작
-    eventSource.addEventListener('chat_message_start', (event) => {
-      setIsStreaming(true);
-      setCurrentMessage('');
-    });
-
-    // 텍스트 스트리밍
-    eventSource.addEventListener('chat_content_delta', (event) => {
-      const data = JSON.parse(event.data);
-      setCurrentMessage(prev => prev + data.delta.text);
-    });
-
-    // 웹 검색 결과
-    eventSource.addEventListener('chat_web_search_results', (event) => {
-      const data = JSON.parse(event.data);
-      setWebSearchResults(data.results);
-    });
-
-    // 메시지 완료
-    eventSource.addEventListener('chat_message_stop', (event) => {
-      setIsStreaming(false);
-      setMessages(prev => [...prev, { 
-        text: currentMessage, 
-        timestamp: new Date(),
-        searchResults: webSearchResults
-      }]);
-      setCurrentMessage('');
-      setWebSearchResults([]);
-    });
-
-    return () => {
-      eventSource.close();
-    };
-  }, [chatEndpoint]);
-
-  return { messages, currentMessage, isStreaming, sessionUuid, webSearchResults };
-}
-```
-
-#### Vue.js 컴포저블 예시
-
-```javascript
-import { ref, onMounted, onUnmounted } from 'vue';
-
-export function useChatSSE(chatEndpoint) {
-  const messages = ref([]);
-  const isStreaming = ref(false);
-  const currentMessage = ref('');
-  const sessionUuid = ref(null);
-  const webSearchResults = ref([]);
-  let eventSource = null;
-
-  onMounted(() => {
-    eventSource = new EventSource(chatEndpoint);
-
-    eventSource.addEventListener('heartbeat', (event) => {
-      const data = JSON.parse(event.data);
-      console.log('연결 유지:', data.timestamp);
-    });
-
-    eventSource.addEventListener('chat_session_info', (event) => {
-      const data = JSON.parse(event.data);
-      sessionUuid.value = data.session_uuid;
-    });
-
-    eventSource.addEventListener('chat_message_start', (event) => {
-      isStreaming.value = true;
-      currentMessage.value = '';
-    });
-
-    eventSource.addEventListener('chat_content_delta', (event) => {
-      const data = JSON.parse(event.data);
-      currentMessage.value += data.delta.text;
-    });
-
-    eventSource.addEventListener('chat_web_search_results', (event) => {
-      const data = JSON.parse(event.data);
-      webSearchResults.value = data.results;
-    });
-
-    eventSource.addEventListener('chat_message_stop', (event) => {
-      isStreaming.value = false;
-      messages.value.push({ 
-        text: currentMessage.value, 
-        timestamp: new Date(),
-        searchResults: webSearchResults.value
-      });
-      currentMessage.value = '';
-      webSearchResults.value = [];
-    });
-  });
-
-  onUnmounted(() => {
-    if (eventSource) {
-      eventSource.close();
+    "type": "complete",
+    "totalPreparationTime": 3456,
+    "buttonsGenerated": 3,
+    "timestamp": "2025-07-08T10:00:04.678901Z",
+    "summary": {
+        "hscode_detected": "8471.30.0000",
+        "confidence_score": 0.95,
+        "analysis_source": "model_classification",
+        "fallback_used": false,
+        "cache_hit": false,
+        "web_search_used": true
+    },
+    "performance": {
+        "total_processing_time": 3456,
+        "database_queries": 0
     }
-  });
-
-  return { messages, currentMessage, isStreaming, sessionUuid, webSearchResults };
 }
 ```
 
-## 🌊 이벤트 플로우
+#### `detail_buttons_error` (타임아웃 시)
+```json
+{
+    "type": "timeout",
+    "errorCode": "DETAIL_PAGE_TIMEOUT",
+    "errorMessage": "상세페이지 정보 준비 시간 초과",
+    "timestamp": "2025-07-08T10:00:11.234567Z",
+    "fallbackActivated": true,
+    "retryInfo": {
+        "retryable": true,
+        "retryAfter": 30,
+        "maxRetries": 3
+    }
+}
+```
+
+## 🌊 이벤트 플로우 (v4.0 개정)
 
 ### 일반 채팅 플로우
 
@@ -657,79 +334,228 @@ sequenceDiagram
 
     FE->>BE: POST /api/v1/chat
     BE->>FE: event: chat_session_info
+    BE->>FE: event: processing_status (1. 사용자 요청 분석)
+    BE->>FE: event: processing_status (2. 대화 맥락 파악)
+    
+    alt 새 세션인 경우
+        BE->>FE: event: chat_metadata_start
+        BE->>FE: event: chat_metadata_stop
+    end
+
     BE->>FE: event: chat_message_start
     BE->>FE: event: chat_content_start
     
-    par 병렬 처리
-        BE->>FE: event: parallel_processing (start)
-        BE->>AI: AI 응답 요청
-        AI-->>BE: 스트리밍 응답
-        BE->>FE: event: chat_content_delta (연속)
-    and 상세페이지 준비
-        BE->>FE: event: detail_buttons_start
-        BE->>FE: event: detail_button_ready (반복)
-        BE->>FE: event: detail_buttons_complete
+    BE->>FE: event: processing_status (3. TrAI-bot에게 질문 전달)
+    BE->>AI: AI 응답 요청
+    
+    BE->>FE: event: processing_status (4. AI 답변 생성)
+    AI-->>BE: 스트리밍 응답
+    loop 텍스트 스트리밍
+      BE->>FE: event: chat_content_delta
     end
     
     BE->>FE: event: chat_content_stop
+    
+    alt 로그인 사용자인 경우
+      BE->>FE: event: processing_status (5. 대화 내용 저장)
+    end
+
     BE->>FE: event: chat_message_delta
     BE->>FE: event: chat_message_limit
     BE->>FE: event: chat_message_stop
 ```
 
-### HSCode 분류 플로우
+### HSCode 분류 플로우 (AI 사고 과정 포함)
 
 ```mermaid
 sequenceDiagram
     participant FE as Frontend
     participant BE as Backend
-    participant HSC as HSCode Service
-    participant WS as Web Search
+    participant AI as AI Service
+    participant PM as Parallel Manager
 
     FE->>BE: POST /api/v1/chat (HSCode 질문)
-    BE->>HSC: 의도 분류
-    HSC-->>BE: HSCode 분류 의도 확인
-    
     BE->>FE: event: chat_session_info
-    BE->>FE: event: chat_message_start
-    BE->>FE: event: chat_content_start
+    BE->>FE: event: processing_status (1. 사용자 요청 분석)
+    BE-->>BE: HSCode 분류 의도 확인
     
-    par HSCode 전문 분석
-        BE->>WS: 화이트리스트 검색
-        WS-->>BE: 관세청/WCO 정보
-        BE->>FE: event: chat_web_search_results (검색 결과)
-        BE->>FE: event: chat_content_delta (전문 분석)
-    and 상세페이지 준비
-        BE->>FE: event: detail_buttons_start
-        BE->>FE: event: detail_button_ready (HS_CODE)
-        BE->>FE: event: detail_button_ready (REGULATION)
-        BE->>FE: event: detail_buttons_complete
+    BE->>FE: event: processing_status (2. 대화 맥락 파악)
+    BE->>FE: event: chat_message_start
+    
+    alt 새 세션인 경우
+        BE->>FE: event: chat_metadata_start
+        BE->>FE: event: chat_metadata_stop
     end
     
+    BE->>FE: event: chat_content_start
+    
+    par AI 응답 생성 and 상세 정보 준비
+        BE->>FE: event: processing_status (3. TrAI-bot에게 질문 전달)
+        BE->>AI: AI 응답 스트림 요청
+        
+        BE->>FE: event: processing_status (4. AI 답변 생성)
+        AI-->>BE: 스트리밍 응답 (사고 과정, 도구 사용, 텍스트 포함)
+        
+        loop 텍스트 및 도구 스트리밍
+            alt AI가 도구 사용 결정 시
+                BE->>FE: event: tool_use (name: web_search)
+                Note over BE: 백엔드에서 웹 검색 실행
+                BE->>FE: event: tool_result
+            else AI가 일반 텍스트 생성 시
+                BE->>FE: event: chat_content_delta
+            end
+        end
+        
+    and
+        BE->>PM: 병렬 작업 실행 요청 (상세 정보 준비)
+        PM-->>BE: event: detail_buttons_start
+        loop 각 버튼 준비 완료 시
+            PM->>BE: event: detail_button_ready
+        end
+        alt 모든 버튼 준비 완료 시
+            PM->>BE: event: detail_buttons_complete
+        else 타임아웃/오류 시
+            PM->>BE: event: detail_buttons_error
+        end
+    end
+
     BE->>FE: event: chat_content_stop
+    
+    alt 로그인 사용자인 경우
+      BE->>FE: event: processing_status (5. 대화 내용 저장)
+    end
+
+    BE->>FE: event: chat_message_delta
+    BE->>FE: event: chat_message_limit
     BE->>FE: event: chat_message_stop
+```
+
+## 📱 프론트엔드 구현 가이드
+
+### 2. 이벤트 핸들러 등록 (개정)
+
+```javascript
+// ... (기본 EventSource 설정)
+
+// 서버 처리 상태 업데이트
+eventSource.addEventListener('processing_status', (event) => {
+  const statusData = JSON.parse(event.data);
+  
+  // UI 업데이트 로직: 스피너 메시지, 진행률 표시줄 등
+  updateProgressUI({
+    message: statusData.message,
+    progress: statusData.progress,
+    step: statusData.current_step,
+    total: statusData.total_steps
+  });
+});
+
+// AI의 도구 사용 시작 (신규)
+eventSource.addEventListener('tool_use', (event) => {
+  const toolData = JSON.parse(event.data);
+  // UI 업데이트 로직: "웹 검색 중..." 메시지 표시 등
+  showToolUI(toolData.tool_name, toolData.tool_input);
+});
+
+// AI의 도구 사용 결과 (신규)
+eventSource.addEventListener('tool_result', (event) => {
+  const resultData = JSON.parse(event.data);
+  // UI 업데이트 로직: 도구 사용 UI를 숨기거나 결과 요약 표시
+  hideToolUI(resultData.tool_use_id);
+});
+
+// 텍스트 스트리밍
+eventSource.addEventListener('chat_content_delta', (event) => {
+  const deltaData = JSON.parse(event.data);
+  const text = deltaData.delta.text;
+  appendTextToCurrentMessage(text);
+});
+
+// 웹 검색 결과 처리 (제거됨)
+// eventSource.addEventListener('chat_web_search_results', ...);
+
+// 상세 버튼 준비 시작
+eventSource.addEventListener('detail_buttons_start', (event) => {
+    const startData = JSON.parse(event.data);
+    initializeButtonContainer(startData.buttonsCount);
+});
+
+// 개별 상세 버튼 준비 완료
+eventSource.addEventListener('detail_button_ready', (event) => {
+  const buttonData = JSON.parse(event.data);
+  createDetailButton(buttonData); // 상세 정보가 담긴 전체 객체 전달
+});
+
+// 모든 상세 버튼 준비 완료
+eventSource.addEventListener('detail_buttons_complete', (event) => {
+    const completeData = JSON.parse(event.data);
+    finalizeButtonContainer(completeData);
+});
+
+// 상세 버튼 오류
+eventSource.addEventListener('detail_buttons_error', (event) => {
+    const errorData = JSON.parse(event.data);
+    handleButtonError(errorData);
+});
+
+
+// 메시지 완료
+eventSource.addEventListener('chat_message_stop', (event) => {
+  // ...
+});
+```
+
+### 3. React/Vue.js 컴포넌트 예시 (개정)
+
+#### React 훅 예시
+```javascript
+import { useEffect, useState } from 'react';
+
+export function useChatSSE(chatEndpoint) {
+  const [currentMessage, setCurrentMessage] = useState('');
+  const [activeTools, setActiveTools] = useState([]); // 현재 진행중인 도구 사용 정보
+  const [processingStatus, setProcessingStatus] = useState(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  // ... (기타 상태: detailButtons, sessionUuid 등)
+
+  useEffect(() => {
+    // ... (EventSource 설정)
+
+    const handleToolUse = (event) => {
+      const data = JSON.parse(event.data);
+      setActiveTools(prev => [...prev, data]);
+    };
+
+    const handleToolResult = (event) => {
+      const data = JSON.parse(event.data);
+      setActiveTools(prev => prev.filter(tool => tool.tool_use_id !== data.tool_use_id));
+    };
+
+    // ... (기타 핸들러: handleContentDelta, handleMessageStart 등)
+    
+    eventSource.addEventListener('tool_use', handleToolUse);
+    eventSource.addEventListener('tool_result', handleToolResult);
+    // eventSource.removeEventListener('chat_web_search_results', ...); // 기존 핸들러 제거
+
+    // ... (나머지 리스너 등록)
+
+    return () => {
+      eventSource.close();
+    };
+  }, [chatEndpoint]);
+
+  return { currentMessage, activeTools, processingStatus, isStreaming };
+}
 ```
 
 ## 🛠️ 디버깅 가이드
 
-### 1. 브라우저 개발자 도구
-
-**Network 탭에서 SSE 모니터링:**
-```
-1. F12 개발자 도구 열기
-2. Network 탭 선택
-3. EventStream 필터 적용
-4. 각 이벤트의 타입과 데이터 확인 가능
-```
-
-### 2. 콘솔 로그 예시
-
+### 2. 콘솔 로그 예시 (개정)
 ```javascript
-// 모든 SSE 이벤트 로깅
 const eventTypes = [
-  'heartbeat', 'chat_session_info', 'chat_message_start', 'chat_metadata_start',
-  'chat_metadata_stop', 'chat_content_start', 'chat_content_delta', 
-  'chat_web_search_results', 'chat_content_stop', 'parallel_processing',
+  'chat_session_info', 'processing_status', 'chat_message_start', 
+  'chat_metadata_start', 'chat_metadata_stop', 'chat_content_start', 
+  'chat_content_delta', 'tool_use', 'tool_result', 'chat_content_stop', 
   'detail_buttons_start', 'detail_button_ready', 'detail_buttons_complete',
   'detail_buttons_error', 'chat_message_delta', 'chat_message_limit', 
   'chat_message_stop'
@@ -738,62 +564,50 @@ const eventTypes = [
 eventTypes.forEach(eventType => {
   eventSource.addEventListener(eventType, (event) => {
     console.group(`🔔 SSE Event: ${eventType}`);
-    console.log('Raw Data:', event.data);
-    console.log('Parsed Data:', JSON.parse(event.data));
+    try {
+        console.log('Parsed Data:', JSON.parse(event.data));
+    } catch (e) {
+        console.log('Raw Data:', event.data);
+    }
     console.log('Timestamp:', new Date().toISOString());
     console.groupEnd();
   });
 });
 ```
 
-### 3. 일반적인 문제와 해결책
-
-| **문제**           | **원인**           | **해결책**                   |
-| ------------------ | ------------------ | ---------------------------- |
-| 이벤트를 받지 못함 | 잘못된 이벤트명    | 이벤트명 확인 (오타 체크)    |
-| JSON 파싱 오류     | 잘못된 데이터 형식 | `try-catch`로 파싱 오류 처리 |
-| 연결 끊김          | 네트워크 문제      | 재연결 로직 구현             |
-| 중복 이벤트 핸들러 | 컴포넌트 재마운트  | 이벤트 리스너 정리           |
-
 ## 📋 체크리스트
 
-### 프론트엔드 구현 체크리스트
+### 프론트엔드 구현 체크리스트 (개정)
 
 - [ ] EventSource 연결 설정 완료
 - [ ] 필수 이벤트 핸들러 등록 (`chat_content_delta`, `chat_message_stop`)
-- [ ] 연결 유지 이벤트 핸들러 등록 (`heartbeat`)
-- [ ] 웹 검색 결과 이벤트 핸들러 등록 (`chat_web_search_results`)
-- [ ] 에러 처리 로직 구현
-- [ ] 연결 상태 UI 표시
+- [ ] **`processing_status` 이벤트 핸들러 등록 및 UI 연동**
+- [ ] **`tool_use` 이벤트 핸들러 등록 및 UI 연동 (예: "검색 중...")**
+- [ ] **`tool_result` 이벤트 핸들러 등록 및 UI 연동**
+- [ ] `chat_web_search_results` 관련 로직 제거
+- [ ] `detail_buttons_*` 이벤트 핸들러(`start`, `ready`, `complete`, `error`) 및 동적 버튼 생성/관리 로직 구현
+- [ ] 에러 처리 로직 구현 (연결 오류, `detail_buttons_error` 등)
 - [ ] 컴포넌트 언마운트 시 EventSource 정리
-- [ ] 세션 정보 저장 및 관리
-- [ ] 진행률 및 상태 표시 UI
-- [ ] 상세 버튼 동적 생성
-- [ ] 웹 검색 결과 별도 UI 컴포넌트 구현
-- [ ] 메타데이터 이벤트 처리 (새 세션 시)
-- [ ] 디버깅 로그 구현
+- [ ] `chat_metadata_*` 이벤트 처리 (새 세션 시)
+- [ ] 모든 이벤트의 상세화된 JSON 구조를 올바르게 처리하는지 확인
 
-### 백엔드 구현 체크리스트
+### 백엔드 구현 체크리스트 (개정)
 
 - [ ] 모든 이벤트에 명확한 `event:` 이름 부여
-- [ ] 일관된 네이밍 컨벤션 적용
-- [ ] 웹 검색 결과 감지 및 분리 로직 구현
-- [ ] 메인 텍스트와 구조화된 데이터 분리 전송
-- [ ] Heartbeat 이벤트 주기적 전송 (30초 간격)
-- [ ] 세션 UUID 일관된 전송
-- [ ] JSON 직렬화 오류 방지
-- [ ] 에러 상황에서의 적절한 이벤트 전송
-- [ ] CORS 헤더 설정
-- [ ] 연결 해제 감지 및 정리
-
-## 📚 참고 자료
-
-- [W3C Server-Sent Events 명세](https://html.spec.whatwg.org/multipage/server-sent-events.html)
-- [MDN EventSource API](https://developer.mozilla.org/en-US/docs/Web/API/EventSource)
-- [FastAPI SSE 가이드](https://fastapi.tiangolo.com/advanced/server-sent-events/)
+- [ ] `processing_status` 이벤트가 각 작업 단계 시작 시 정확히 전송되는지 확인
+- [ ] HSCode 분류 시 웹 검색 결과 감지 및 `chat_web_search_results` 이벤트로 분리 전송
+- [ ] 일반 채팅과 HSCode 분류 플로우의 조건부 이벤트(`detail_buttons_*`, 추가 `processing_status` 단계)가 올바르게 분기되는지 확인
+- [ ] `ParallelTaskManager`가 `detail_buttons_*` 이벤트를 정확한 순서(start -> ready... -> complete/error)로 생성하는지 확인
+- [ ] 새 세션일 때만 `chat_metadata_*` 이벤트가 전송되는지 확인
+- [ ] 모든 이벤트의 JSON 페이로드 구조가 이 문서와 일치하는지 확인
+- [ ] 에러 상황(타임아웃 포함)에서 적절한 `detail_buttons_error` 이벤트가 전송되는지 확인
+- [ ] **`astream_events`를 사용하여 AI 모델의 `tool_use` 블록 감지**
+- [ ] **`tool_use` 감지 시, `generate_tool_use_event`를 호출하여 SSE 이벤트 전송**
+- [ ] **내부 도구 실행 후, `generate_tool_result_event`를 호출하여 SSE 이벤트 전송**
+- [ ] 기존 `chat_web_search_results` 이벤트 생성 로직 제거
 
 ---
 
-**문서 버전**: v2.1  
-**최종 수정**: 2025-07-06  
-**작성자**: AI 개발팀 
+**문서 버전**: v4.0  
+**최종 수정**: 2025-07-09  
+**작성자**: AI 개발팀 (자동화된 코드 분석 기반) 

@@ -16,7 +16,8 @@ from pydantic import SecretStr
 
 from app.core.config import settings
 from app.core.llm_provider import llm_provider
-from app.services.web_search_service import WebSearchService
+
+# from app.services.web_search_service import WebSearchService # 이 줄을 삭제합니다.
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class EnhancedDetailGenerator:
 
     def __init__(self):
         self.llm = llm_provider.base_llm
-        self.web_search_service = WebSearchService()
+        # self.web_search_service = WebSearchService() # 이 줄을 삭제합니다.
 
         # 주요 수출입 대상국
         self.major_countries = {
@@ -61,14 +62,22 @@ class EnhancedDetailGenerator:
         try:
             # 병렬로 여러 정보 생성
             tasks = [
-                self._generate_tariff_info(hscode, product_description, db_session),
+                self._generate_tariff_info(
+                    hscode, product_description
+                ),  # db_session 제거
                 self._generate_trade_agreement_info(
-                    hscode, product_description, db_session
-                ),
-                self._generate_regulation_info(hscode, product_description, db_session),
-                self._generate_non_tariff_info(hscode, product_description, db_session),
+                    hscode, product_description
+                ),  # db_session 제거
+                self._generate_regulation_info(
+                    hscode, product_description
+                ),  # db_session 제거
+                self._generate_non_tariff_info(
+                    hscode, product_description
+                ),  # db_session 제거
                 self._generate_similar_hscodes(hscode, product_description),
-                self._generate_market_analysis(hscode, product_description, db_session),
+                self._generate_market_analysis(
+                    hscode, product_description
+                ),  # db_session 제거
             ]
 
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -119,13 +128,13 @@ class EnhancedDetailGenerator:
             return self._get_fallback_detail_info(hscode, product_description)
 
     async def _generate_tariff_info(
-        self, hscode: str, product_description: str, db_session=None
+        self, hscode: str, product_description: str
     ) -> Dict[str, Any]:
         """관세율 정보 생성"""
 
         prompt = f"""You are a trade expert specializing in tariff analysis. Generate comprehensive tariff information for HSCode {hscode} ({product_description}).
 
-Provide detailed tariff information in the following JSON structure:
+Provide detailed tariff information in the following JSON structure. Your response MUST be only the JSON object, without any additional text, explanations, or markdown formatting.
 
 {{
     "countries": {{
@@ -162,8 +171,7 @@ Provide detailed tariff information in the following JSON structure:
         }}
     ]
 }}
-
-Focus on accuracy and practical applicability. Use realistic tariff rates based on current trade patterns."""
+"""
 
         try:
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -177,13 +185,7 @@ Focus on accuracy and practical applicability. Use realistic tariff rates based 
                 )
                 tariff_info = self._get_fallback_tariff_info(hscode)
 
-            # 웹 검색으로 최신 정보 보강 (선택적)
-            if db_session:
-                try:
-                    web_info = await self._search_tariff_web_info(hscode, db_session)
-                    tariff_info["web_search_supplement"] = web_info
-                except Exception as e:
-                    logger.warning(f"Web search for tariff info failed: {e}")
+            # 웹 검색 보강 로직은 삭제됨
 
             return tariff_info
 
@@ -192,7 +194,7 @@ Focus on accuracy and practical applicability. Use realistic tariff rates based 
             return self._get_fallback_tariff_info(hscode)
 
     async def _generate_trade_agreement_info(
-        self, hscode: str, product_description: str, db_session=None
+        self, hscode: str, product_description: str
     ) -> Dict[str, Any]:
         """무역협정 정보 생성"""
 
@@ -200,7 +202,7 @@ Focus on accuracy and practical applicability. Use realistic tariff rates based 
 
 Focus on FTA (Free Trade Agreement) benefits and EPA (Economic Partnership Agreement) advantages.
 
-Provide information in this JSON structure:
+Provide information in this JSON structure. Your response MUST be only the JSON object, without any additional text, explanations, or markdown formatting.
 
 {{
     "applicable_agreements": {{
@@ -233,22 +235,13 @@ Provide information in this JSON structure:
         "procedural_simplifications": []
     }}
 }}
-
-Ensure accuracy regarding actual trade agreements and their provisions."""
+"""
 
         try:
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
             trade_info = self._extract_json_from_response(response.content)
 
-            # 웹 검색으로 최신 협정 정보 보강
-            if db_session:
-                try:
-                    web_info = await self._search_trade_agreement_web_info(
-                        hscode, db_session
-                    )
-                    trade_info["web_search_supplement"] = web_info
-                except Exception as e:
-                    logger.warning(f"Web search for trade agreement info failed: {e}")
+            # 웹 검색 보강 로직은 삭제됨
 
             return trade_info
 
@@ -257,7 +250,7 @@ Ensure accuracy regarding actual trade agreements and their provisions."""
             return self._get_fallback_trade_agreement_info(hscode)
 
     async def _generate_regulation_info(
-        self, hscode: str, product_description: str, db_session=None
+        self, hscode: str, product_description: str
     ) -> Dict[str, Any]:
         """규제 정보 생성"""
 
@@ -265,7 +258,7 @@ Ensure accuracy regarding actual trade agreements and their provisions."""
 
 Cover import/export regulations, certification requirements, and compliance issues.
 
-Provide information in this JSON structure:
+Provide information in this JSON structure. Your response MUST be only the JSON object, without any additional text, explanations, or markdown formatting.
 
 {{
     "import_regulations": {{
@@ -316,22 +309,13 @@ Provide information in this JSON structure:
         ]
     }}
 }}
-
-Base information on current regulatory frameworks and actual requirements."""
+"""
 
         try:
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
             regulation_info = self._extract_json_from_response(response.content)
 
-            # 웹 검색으로 최신 규제 정보 보강
-            if db_session:
-                try:
-                    web_info = await self._search_regulation_web_info(
-                        hscode, db_session
-                    )
-                    regulation_info["web_search_supplement"] = web_info
-                except Exception as e:
-                    logger.warning(f"Web search for regulation info failed: {e}")
+            # 웹 검색 보강 로직은 삭제됨
 
             return regulation_info
 
@@ -340,7 +324,7 @@ Base information on current regulatory frameworks and actual requirements."""
             return self._get_fallback_regulation_info(hscode)
 
     async def _generate_non_tariff_info(
-        self, hscode: str, product_description: str, db_session=None
+        self, hscode: str, product_description: str
     ) -> Dict[str, Any]:
         """비관세 정보 생성"""
 
@@ -355,7 +339,7 @@ Identify and describe various non-tariff trade barriers, including:
 - Trade restrictions (embargoes, prohibitions, quantitative restrictions)
 - Trade sanctions
 
-Provide information in this JSON structure:
+Provide information in this JSON structure. Your response MUST be only the JSON object, without any additional text, explanations, or markdown formatting.
 
 {{
     "ntbs": {{
@@ -394,22 +378,13 @@ Provide information in this JSON structure:
         "procedural_simplifications": []
     }}
 }}
-
-Ensure accuracy regarding actual non-tariff trade barriers and their implications."""
+"""
 
         try:
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
             non_tariff_info = self._extract_json_from_response(response.content)
 
-            # 웹 검색으로 최신 비관세 정보 보강
-            if db_session:
-                try:
-                    web_info = await self._search_non_tariff_web_info(
-                        hscode, db_session
-                    )
-                    non_tariff_info["web_search_supplement"] = web_info
-                except Exception as e:
-                    logger.warning(f"Web search for non-tariff info failed: {e}")
+            # 웹 검색 보강 로직은 삭제됨
 
             return non_tariff_info
 
@@ -426,7 +401,7 @@ Ensure accuracy regarding actual non-tariff trade barriers and their implication
 
 Identify related codes that users might be interested in or that could be alternative classifications.
 
-Provide information in this JSON structure:
+Provide information in this JSON structure. Your response MUST be only the JSON object, without any additional text, explanations, or markdown formatting.
 
 {{
     "direct_related": [
@@ -463,8 +438,7 @@ Provide information in this JSON structure:
         "expert_guidance": []
     }}
 }}
-
-Focus on practical utility for trade professionals."""
+"""
 
         try:
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
@@ -476,7 +450,7 @@ Focus on practical utility for trade professionals."""
             return self._get_fallback_similar_hscodes(hscode)
 
     async def _generate_market_analysis(
-        self, hscode: str, product_description: str, db_session=None
+        self, hscode: str, product_description: str
     ) -> Dict[str, Any]:
         """시장 분석 정보 생성"""
 
@@ -484,7 +458,7 @@ Focus on practical utility for trade professionals."""
 
 Provide trade statistics, trends, and market insights.
 
-Structure the information as follows:
+Structure the information as follows. Your response MUST be only the JSON object, without any additional text, explanations, or markdown formatting.
 
 {{
     "trade_statistics": {{
@@ -535,20 +509,13 @@ Structure the information as follows:
         "strategic_recommendations": []
     }}
 }}
-
-Base analysis on realistic market conditions and industry knowledge."""
+"""
 
         try:
             response = await self.llm.ainvoke([HumanMessage(content=prompt)])
             market_info = self._extract_json_from_response(response.content)
 
-            # 웹 검색으로 최신 시장 데이터 보강
-            if db_session:
-                try:
-                    web_info = await self._search_market_web_info(hscode, db_session)
-                    market_info["web_search_supplement"] = web_info
-                except Exception as e:
-                    logger.warning(f"Web search for market info failed: {e}")
+            # 웹 검색 보강 로직은 삭제됨
 
             return market_info
 
@@ -556,76 +523,22 @@ Base analysis on realistic market conditions and industry knowledge."""
             logger.error(f"Error generating market analysis: {e}")
             return self._get_fallback_market_analysis(hscode)
 
-    async def _search_tariff_web_info(self, hscode: str, db_session) -> Dict[str, Any]:
-        """관세율 관련 웹 검색"""
-        query = f"HSCode {hscode} tariff rate Korea import export duty"
-        results = await self.web_search_service.search_hscode_info(query, db_session)
-        return {
-            "search_performed": True,
-            "results_count": len(results.get("results", [])),
-            "key_findings": results.get("summary", "No specific findings"),
-            "sources": [r.get("url", "") for r in results.get("results", [])][:3],
-        }
-
-    async def _search_trade_agreement_web_info(
-        self, hscode: str, db_session
-    ) -> Dict[str, Any]:
-        """무역협정 관련 웹 검색"""
-        query = f"HSCode {hscode} FTA preferential tariff Korea trade agreement"
-        results = await self.web_search_service.search_hscode_info(query, db_session)
-        return {
-            "search_performed": True,
-            "results_count": len(results.get("results", [])),
-            "key_findings": results.get("summary", "No specific findings"),
-            "sources": [r.get("url", "") for r in results.get("results", [])][:3],
-        }
-
-    async def _search_regulation_web_info(
-        self, hscode: str, db_session
-    ) -> Dict[str, Any]:
-        """규제 정보 관련 웹 검색"""
-        query = f"HSCode {hscode} import regulation certification requirement Korea"
-        results = await self.web_search_service.search_hscode_info(query, db_session)
-        return {
-            "search_performed": True,
-            "results_count": len(results.get("results", [])),
-            "key_findings": results.get("summary", "No specific findings"),
-            "sources": [r.get("url", "") for r in results.get("results", [])][:3],
-        }
-
-    async def _search_market_web_info(self, hscode: str, db_session) -> Dict[str, Any]:
-        """시장 분석 관련 웹 검색"""
-        query = f"HSCode {hscode} trade statistics market analysis Korea export import"
-        results = await self.web_search_service.search_hscode_info(query, db_session)
-        return {
-            "search_performed": True,
-            "results_count": len(results.get("results", [])),
-            "key_findings": results.get("summary", "No specific findings"),
-            "sources": [r.get("url", "") for r in results.get("results", [])][:3],
-        }
-
-    async def _search_non_tariff_web_info(
-        self, hscode: str, db_session
-    ) -> Dict[str, Any]:
-        """비관세 관련 웹 검색"""
-        query = f"HSCode {hscode} non-tariff trade barriers Korea"
-        results = await self.web_search_service.search_hscode_info(query, db_session)
-        return {
-            "search_performed": True,
-            "results_count": len(results.get("results", [])),
-            "key_findings": results.get("summary", "No specific findings"),
-            "sources": [r.get("url", "") for r in results.get("results", [])][:3],
-        }
+    # _search_*_web_info 헬퍼 메서드들은 모두 삭제합니다.
+    # async def _search_tariff_web_info...
+    # async def _search_trade_agreement_web_info...
+    # async def _search_regulation_web_info...
+    # async def _search_market_web_info...
+    # async def _search_non_tariff_web_info...
 
     def _extract_json_from_response(self, response_content) -> Dict[str, Any]:
         """AI 응답에서 JSON 추출 - 다양한 응답 타입 처리"""
+        text = ""
         try:
             # 응답 타입에 따른 처리
             if isinstance(response_content, str):
                 text = response_content
             elif isinstance(response_content, list):
                 # list인 경우 첫 번째 문자열 요소 찾기
-                text = ""
                 for item in response_content:
                     if isinstance(item, str):
                         text = item
@@ -634,6 +547,7 @@ Base analysis on realistic market conditions and industry knowledge."""
                         text = item["text"]
                         break
                 if not text:
+                    logger.warning("No text content found in list response")
                     return {"error": "No text content found in list response"}
             else:
                 # 기타 타입인 경우 문자열로 변환 시도
@@ -641,49 +555,57 @@ Base analysis on realistic market conditions and industry knowledge."""
 
             text = text.strip()
 
-            # JSON 블록 찾기
-            start_markers = ["```json", "```", "{"]
+            # JSON 블록 찾기 (마크다운 코드 블록 제거)
+            if text.startswith("```json"):
+                text = text[len("```json") :].strip()
+            if text.startswith("```"):
+                text = text[len("```") :].strip()
+            if text.endswith("```"):
+                text = text[: -len("```")].strip()
 
-            # JSON 시작 지점 찾기
-            start_pos = -1
-            for marker in start_markers:
-                pos = text.find(marker)
-                if pos != -1:
-                    if marker == "{":
-                        start_pos = pos
-                    else:
-                        start_pos = pos + len(marker)
-                    break
-
+            # 응답 시작에 있는 불필요한 텍스트 제거 (예: "Here is the JSON...")
+            start_pos = text.find("{")
             if start_pos == -1:
-                start_pos = 0
+                raise json.JSONDecodeError("No JSON object found in response", text, 0)
 
-            # JSON 끝 지점 찾기 (마지막 } 찾기)
-            brace_count = 0
-            end_pos = len(text)
-            for i in range(start_pos, len(text)):
-                if text[i] == "{":
-                    brace_count += 1
-                elif text[i] == "}":
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_pos = i + 1
-                        break
+            # 응답 끝에 있는 불필요한 텍스트 제거
+            end_pos = text.rfind("}")
+            if end_pos == -1:
+                raise json.JSONDecodeError("No JSON object found in response", text, 0)
 
-            json_text = text[start_pos:end_pos]
+            json_text = text[start_pos : end_pos + 1]
+
             return json.loads(json_text)
 
-        except (json.JSONDecodeError, Exception) as e:
-            logger.warning(f"Failed to extract JSON from response: {e}")
-            # 오류 시 안전한 문자열 변환
-            error_text = (
-                str(response_content)[:500] if response_content else "Empty response"
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"Failed to decode JSON from response. Error: {e}. Raw text: '{text[:500]}...'"
             )
-            return {"error": "JSON parsing failed", "raw_response": error_text}
+            return {
+                "error": "JSON parsing failed",
+                "reason": str(e),
+                "raw_response": text[:500],
+            }
+        except Exception as e:
+            logger.warning(
+                f"An unexpected error occurred in _extract_json_from_response: {e}"
+            )
+            return {
+                "error": "Unexpected error during JSON extraction",
+                "reason": str(e),
+                "raw_response": text[:500],
+            }
 
     def _calculate_quality_score(self, results: List[Any]) -> float:
         """생성된 정보의 품질 점수 계산"""
-        successful_results = sum(1 for r in results if not isinstance(r, Exception))
+        if not results:
+            return 0.0
+
+        successful_results = 0
+        for r in results:
+            if isinstance(r, dict) and "error" not in r:
+                successful_results += 1
+
         total_results = len(results)
 
         if total_results == 0:
@@ -694,29 +616,38 @@ Base analysis on realistic market conditions and industry knowledge."""
         # 각 결과의 내용 품질 평가
         content_quality = 0.0
         for result in results:
-            if not isinstance(result, Exception) and isinstance(result, dict):
+            if isinstance(result, dict) and "error" not in result:
                 # 키의 개수와 값의 존재 여부로 품질 평가
-                if len(result) > 3:  # 최소 4개 키 이상
+                if len(result) > 2 and any(result.values()):
                     content_quality += 0.2
                 else:
-                    content_quality += 0.1
+                    content_quality += 0.05
 
-        return min(base_score + content_quality, 1.0)
+        # 최종 점수는 1점을 넘지 않도록 하고, 성공한 결과가 하나도 없다면 0.1 이하로 유지
+        final_score = base_score
+        if successful_results > 0:
+            final_score += content_quality / successful_results
+
+        if successful_results == 0:
+            return 0.1  # 모든 정보 생성 실패 시 매우 낮은 점수
+
+        return min(final_score, 1.0)
 
     def _get_quality_indicators(self, results: List[Any]) -> Dict[str, Any]:
         """품질 지표 생성"""
+        successful_generations = sum(
+            1 for r in results if isinstance(r, dict) and "error" not in r
+        )
         return {
-            "successful_generations": sum(
-                1 for r in results if not isinstance(r, Exception)
-            ),
+            "successful_generations": successful_generations,
             "total_attempts": len(results),
-            "error_types": [
-                type(r).__name__ for r in results if isinstance(r, Exception)
+            "error_details": [
+                r for r in results if isinstance(r, dict) and "error" in r
             ],
             "data_completeness": (
                 "high"
-                if all(not isinstance(r, Exception) for r in results)
-                else "partial"
+                if successful_generations == len(results)
+                else ("partial" if successful_generations > 0 else "failed")
             ),
         }
 
