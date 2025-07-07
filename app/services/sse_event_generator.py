@@ -188,19 +188,3 @@ class SSEEventGenerator:
             "timestamp": self._get_timestamp(),
         }
         return self._format_event("thinking_process", event_data)
-
-    def generate_hscode_inferred_event(
-        self, hscode: str, product_name: Optional[str]
-    ) -> str:
-        """
-        초기 HSCode 추론 완료 이벤트를 생성함
-        """
-        data = {
-            "type": "hscode_inferred",
-            "hscode": hscode,
-            "product_name": product_name,
-            "confidence": 0.85,  # 예비 추론 단계의 신뢰도 (고정값)
-            "source": "preliminary_llm_extraction",
-            "timestamp": self._get_timestamp(),
-        }
-        return self._format_event("hscode_inferred", data)

@@ -6,6 +6,11 @@ from langchain_voyageai import VoyageAIEmbeddings
 from langchain_postgres import PGEngine, PGVectorStore
 from pydantic import SecretStr
 from typing import Optional
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import Runnable
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
 
 from app.core.config import settings
 
@@ -77,46 +82,44 @@ class LLMProvider:
         # 'news'용 웹 검색 도구 (특정 도메인 제한 기능 포함)
         self.news_web_search_tool = {
             **self.basic_web_search_tool,
-            # "allowed_domains": [
-            #     # 프롬프트 수정 전 까지는 나머지 사이트들 전부 주석처리 ( 최신 내용을 못 가져옴 )
-            #     # 할 일.md 파일 참조.
-            #
-            #     # 글로벌 사이트들
-            #     "www.cnbc.com/shipping/",
-            #     "www.supplychaindive.com/",
-            #     "www.supplychainbrain.com/",
-            #     "supplychaindigital.com/",
-            #     "www.globaltrademag.com/",
-            #     "www.freightwaves.com/",
-            #     "www.maritime-executive.com/",
-            #     "aircargoworld.com/",
-            #     "theloadstar.com/",
-            #     "finance.yahoo.com/news/",
-            #     "indiashippingnews.com/",
-            #     "www.ajot.com/",
-            #     "www.scdigest.com/",
-            #     "www.inboundlogistics.com/",
-            #     "www.railjournal.com/",
-            #     "www.transportjournal.com/",
-            #     "landline.media/",
-            #     "www.aircargoweek.com/",
-            #     "www.automotivelogistics.media/",
-            #     "breakbulk.com/",
-            #     "gcaptain.com/",
-            #     "www.marinelink.com/",
-            #     "splash247.com/",
-            #
-            #     # 한국 사이트들
-            #     "dream.kotra.or.kr/kotranews/index.do",
-            #     "www.kita.net/board/totalTradeNews/totalTradeNewsList.do",
-            #     "www.kita.net/mberJobSport/shippers/board/list.do",
-            #     "www.klnews.co.kr",
-            #     "www.kcnews.org/",
-            #     "www.maritimepress.co.kr",
-            #     "www.weeklytrade.co.kr/",
-            #     "www.shippingnewsnet.com",
-            #     "www.cargotimes.net/"
-            # ],
+            "allowed_domains": [
+                # 프롬프트 수정 전 까지는 나머지 사이트들 전부 주석처리 ( 최신 내용을 못 가져옴 )
+                # 할 일.md 파일 참조.
+                # 글로벌 사이트들
+                # "www.cnbc.com/shipping/",
+                # "www.supplychaindive.com/",
+                # "www.supplychainbrain.com/",
+                # "supplychaindigital.com/",
+                # "www.globaltrademag.com/",
+                # "www.freightwaves.com/",
+                # "www.maritime-executive.com/",
+                # "aircargoworld.com/",
+                # "theloadstar.com/",
+                "finance.yahoo.com/news/",
+                # "indiashippingnews.com/",
+                # "www.ajot.com/",
+                # "www.scdigest.com/",
+                # "www.inboundlogistics.com/",
+                # "www.railjournal.com/",
+                # "www.transportjournal.com/",
+                # "landline.media/",
+                # "www.aircargoweek.com/",
+                # "www.automotivelogistics.media/",
+                # "breakbulk.com/",
+                # "gcaptain.com/",
+                # "www.marinelink.com/",
+                # "splash247.com/",
+                # # 한국 사이트들
+                # "dream.kotra.or.kr/kotranews/index.do",
+                # "www.kita.net/board/totalTradeNews/totalTradeNewsList.do",
+                # "www.kita.net/mberJobSport/shippers/board/list.do",
+                # "www.klnews.co.kr",
+                # "www.kcnews.org/",
+                # "www.maritimepress.co.kr",
+                # "www.weeklytrade.co.kr/",
+                # "www.shippingnewsnet.com",
+                # "www.cargotimes.net/"
+            ],
         }
 
         # 'monitoring'용 웹 검색 도구 (기본 설정 사용)
@@ -190,14 +193,14 @@ class LLMProvider:
             model_name="claude-sonnet-4-20250514",
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
-            max_tokens_to_sample=20_000,
+            max_tokens_to_sample=14_000,
             timeout=300.0,  # timeout을 5분 (300초)으로 명시적으로 설정
             max_retries=3,
             stop=None,
             default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
             },
-            thinking={"type": "enabled", "budget_tokens": 14_000},
+            thinking={"type": "enabled", "budget_tokens": 8_000},
             rate_limiter=chat_rate_limiter,  # HSCode 분류는 대화형이므로 채팅 제한기 사용
         )
 
@@ -208,21 +211,13 @@ class LLMProvider:
 
         # 7. 용도별 LLM 모델 최종 생성
         # 모든 모델에 재시도 로직을 적용하여 안정성 강화
-        self.news_chat_model = self.news_llm_with_native_search.with_retry(
-            **self.retry_config
-        )
+        self.news_chat_model = (
+            self.news_llm_with_native_search | StrOutputParser()
+        ).with_retry(**self.retry_config)
         self.monitoring_chat_model = monitoring_base_llm.with_retry(**self.retry_config)
-        self.hscode_chat_model = self.hscode_base_llm.with_retry(**self.retry_config)
-
-        # 하위 호환성을 위해 news_llm_with_native_search도 동일하게 retry가 적용된 모델을 참조하도록 함
-        self.news_llm_with_native_search = self.news_chat_model
-
-        self.hscode_llm_with_web_search = self.hscode_llm_with_web_search.with_retry(
-            **self.retry_config
-        )
-
-        # monitoring_llm_with_native_search는 서비스 레이어에서 직접 생성하도록 책임을 위임함.
-        # self.monitoring_llm_with_native_search = monitoring_model_with_tools_bound
+        self.hscode_chat_model = (
+            self.hscode_llm_with_web_search | StrOutputParser()
+        ).with_retry(**self.retry_config)
 
         # 7. Voyage AI 임베딩 모델 초기화
         if not settings.VOYAGE_API_KEY:
