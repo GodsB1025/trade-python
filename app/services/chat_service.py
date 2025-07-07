@@ -62,7 +62,7 @@ async def generate_session_title(user_message: str, ai_response: str) -> str:
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=0.3,
             max_tokens_to_sample=100,
-            timeout=None,
+            timeout=300.0,
             stop=None,
         )
         prompt = f"""다음 대화를 기반으로 짧고 명확한 세션 제목을 생성해주세요.
@@ -117,7 +117,7 @@ async def _extract_hscode_from_message(
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=0.0,
             max_tokens_to_sample=200,
-            timeout=None,
+            timeout=300.0,
             stop=None,
         )
         prompt = f"""사용자의 다음 메시지에서 HSCode와 가장 핵심적인 품목명을 추출해주세요.

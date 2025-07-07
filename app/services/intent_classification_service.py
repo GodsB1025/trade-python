@@ -54,7 +54,7 @@ class IntentClassificationService:
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=0.1,  # 더 일관성 있는 결과를 위해 낮춤
             max_tokens_to_sample=1500,  # 토큰 수 조정
-            timeout=45,  # 타임아웃 설정
+            timeout=300.0,  # 타임아웃 설정
             max_retries=2,  # LangChain 레벨에서도 재시도 설정
             stop=None,
         )

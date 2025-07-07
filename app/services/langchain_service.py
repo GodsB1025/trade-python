@@ -70,7 +70,7 @@ class LLMService:
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=0.1,
             max_tokens_to_sample=300,
-            timeout=None,
+            timeout=300.0,
             stop=None,
         )
 

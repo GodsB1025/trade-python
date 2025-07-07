@@ -102,7 +102,7 @@ async def handle_chat(
             yield f"event: chat_session_info\ndata: {session_info_json}\n\n"
 
             # 백프레셔 방지를 위한 짧은 대기
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0.1)
 
             # 연결 상태 재확인
             if await request.is_disconnected():

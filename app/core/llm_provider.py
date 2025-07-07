@@ -1,4 +1,5 @@
 import anthropic
+import httpx
 from langchain_anthropic import ChatAnthropic
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_voyageai import VoyageAIEmbeddings
@@ -178,7 +179,7 @@ class LLMProvider:
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
             max_tokens_to_sample=20_000,
-            timeout=None,
+            timeout=300.0,  # timeout을 5분 (300초)으로 명시적으로 설정
             max_retries=3,
             stop=None,
             default_headers={
@@ -196,13 +197,15 @@ class LLMProvider:
 
         # 7. 용도별 LLM 모델 최종 생성
         # 모든 모델에 재시도 로직을 적용하여 안정성 강화
-        self.news_chat_model = self.base_llm.with_retry(**self.retry_config)
+        self.news_chat_model = self.news_llm_with_native_search.with_retry(
+            **self.retry_config
+        )
         self.monitoring_chat_model = self.base_llm.with_retry(**self.retry_config)
         self.hscode_chat_model = self.hscode_base_llm.with_retry(**self.retry_config)
 
-        self.news_llm_with_native_search = self.news_llm_with_native_search.with_retry(
-            **self.retry_config
-        )
+        # 하위 호환성을 위해 news_llm_with_native_search도 동일하게 retry가 적용된 모델을 참조하도록 함
+        self.news_llm_with_native_search = self.news_chat_model
+
         self.hscode_llm_with_web_search = self.hscode_llm_with_web_search.with_retry(
             **self.retry_config
         )

@@ -44,8 +44,8 @@ async def test_sse_event_generator():
 
     # 1. thinking 이벤트 테스트
     print("1. Thinking 이벤트:")
-    thinking_event = generator.generate_thinking_event(
-        "intent_analysis", "사용자 의도를 분석하고 있습니다...", 25
+    thinking_event = generator.generate_processing_status_event(
+        message="사용자 의도를 분석하고 있습니다...", step=1, total_steps=4
     )
     print(thinking_event)
 
@@ -143,16 +143,18 @@ async def test_detailed_page_preparation():
         detected_intent="hscode_search",
         detail_buttons=[
             DetailButton(
-                type="HS_CODE",
+                type="link",
                 label="HS Code 상세정보",
                 url="/detail/hscode",
+                action=None,
                 query_params={"hscode": "8517.12.00"},
                 priority=1,
             ),
             DetailButton(
-                type="REGULATION",
+                type="link",
                 label="규제 정보",
                 url="/regulation",
+                action=None,
                 query_params={"hscode": "8517.12.00"},
                 priority=2,
             ),
