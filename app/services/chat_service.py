@@ -324,6 +324,12 @@ class ChatService:
                 extracted_hscode, extracted_product_name = (
                     await _extract_hscode_from_message(chat_request.message)
                 )
+
+                if extracted_hscode:
+                    yield self.sse_generator.generate_hscode_inferred_event(
+                        extracted_hscode, extracted_product_name
+                    )
+
                 chat_model = llm_provider.hscode_llm_with_web_search
             else:
                 chat_model = llm_provider.news_chat_model
