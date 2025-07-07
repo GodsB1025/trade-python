@@ -18,6 +18,53 @@ class SSEEventGenerator:
         """SSE 이벤트 문자열을 포맷팅함"""
         return f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+    def generate_hscode_classification_event(
+        self,
+        hscode: Optional[str] = None,
+        confidence_score: Optional[float] = None,
+        classification_reason: Optional[str] = None,
+        product_name: Optional[str] = None,
+        alternative_codes: Optional[List[str]] = None,
+    ) -> str:
+        """HSCode 분류 결과 이벤트 생성"""
+        data = {
+            "type": "hscode_classification",
+            "classification_result": {
+                "hscode": hscode,
+                "confidence_score": confidence_score,
+                "classification_reason": classification_reason,
+                "product_name": product_name,
+                "alternative_codes": alternative_codes or [],
+                "classified_at": self._get_timestamp(),
+            },
+            "metadata": {
+                "source": "hscode_classification_service",
+                "processing_completed": True,
+            },
+            "timestamp": self._get_timestamp(),
+        }
+        return self._format_event("hscode_classification_result", data)
+
+    def generate_hscode_analysis_start_event(self) -> str:
+        """HSCode 분석 시작 이벤트"""
+        data = {
+            "type": "hscode_analysis_start",
+            "message": "HSCode 분류 분석을 시작함",
+            "timestamp": self._get_timestamp(),
+            "status": "analyzing",
+        }
+        return self._format_event("hscode_analysis_start", data)
+
+    def generate_hscode_analysis_progress_event(self, stage: str, progress: int) -> str:
+        """HSCode 분석 진행 상황 이벤트"""
+        data = {
+            "type": "hscode_analysis_progress",
+            "stage": stage,
+            "progress": progress,
+            "timestamp": self._get_timestamp(),
+        }
+        return self._format_event("hscode_analysis_progress", data)
+
     def generate_processing_status_event(
         self, message: str, step: int, total_steps: int, is_sub_step: bool = False
     ) -> str:

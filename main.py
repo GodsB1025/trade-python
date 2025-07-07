@@ -19,6 +19,7 @@ def main():
         port=settings.SERVER_PORT,
         reload=settings.debug,
         timeout_keep_alive=300,
+        timeout_graceful_shutdown=30
         log_level="info" if not settings.debug else "debug",
     )
 

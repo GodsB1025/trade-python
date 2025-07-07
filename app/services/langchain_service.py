@@ -69,6 +69,7 @@ class LLMService:
             model_name="claude-3-5-haiku-latest",
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=0.1,
+            streaming=True,
             max_tokens_to_sample=300,
             timeout=300.0,
             stop=None,

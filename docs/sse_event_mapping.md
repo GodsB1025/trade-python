@@ -44,6 +44,14 @@
 | `tool_use`    | AI의 도구 사용 시작 알림          | AI가 도구 호출을 결정한 직후 | `{type, tool_use_id, tool_name, tool_input, ...}` |
 | `tool_result` | AI가 사용한 도구의 실행 결과 전달 | 내부 도구 실행 완료 후       | `{type, tool_use_id, tool_name, content, ...}`    |
 
+### 2.1. HSCode 분류 전용 이벤트 (신규)
+
+| **이벤트명**                   | **설명**              | **발생 시점**       | **데이터 구조 (간략)**                                        |
+| ------------------------------ | --------------------- | ------------------- | ------------------------------------------------------------- |
+| `hscode_analysis_start`        | HSCode 분석 시작 알림 | HSCode 의도 감지 후 | `{type: "hscode_analysis_start", message, status, ...}`       |
+| `hscode_analysis_progress`     | HSCode 분석 진행 상황 | 분석 단계별 진행 시 | `{type: "hscode_analysis_progress", stage, progress, ...}`    |
+| `hscode_classification_result` | HSCode 분류 결과 전송 | 분류 완료 후        | `{type: "hscode_classification", classification_result, ...}` |
+
 ### 3. 처리 상태 이벤트
 
 | **이벤트명**        | **설명**                   | **발생 시점**    | **데이터 구조 (간략)**                             |
@@ -179,7 +187,52 @@
     "timestamp": "2025-07-09T11:00:03.250Z"
 }
 ```
-**설명**: `tool_use` 이벤트에 대한 실행 결과를 담고 있습니다. 프론트엔드는 이 결과를 직접 표시하거나, AI가 이 결과를 바탕으로 최종 답변을 생성하는 동안 대기 상태를 유지할 수 있습니다.
+**설명**: `tool_use` 이벤트에 대한 실행 결과를 담고 있습니다. 프론트엔드는 이 결과를 직접 표시하거나, AI가 이 결과를 바탕으로 최종 답변을 생성하는 동간 대기 상태를 유지할 수 있습니다.
+
+### 2.1. HSCode 분류 전용 이벤트 (신규)
+
+#### `hscode_analysis_start`
+```json
+{
+    "type": "hscode_analysis_start",
+    "message": "HSCode 분류 분석을 시작함",
+    "timestamp": "2025-07-09T11:00:00.123Z",
+    "status": "analyzing"
+}
+```
+**설명**: HSCode 분류 의도가 감지되어 전문적인 분류 분석을 시작했음을 알립니다. 프론트엔드에서는 HSCode 전용 UI 모드로 전환할 수 있습니다.
+
+#### `hscode_analysis_progress`
+```json
+{
+    "type": "hscode_analysis_progress", 
+    "stage": "정보 분석",
+    "progress": 25,
+    "timestamp": "2025-07-09T11:00:01.456Z"
+}
+```
+**설명**: HSCode 분류 과정의 진행 상황을 단계별로 알립니다. 일반적인 단계는 "정보 분석" → "분류 완료" 순입니다.
+
+#### `hscode_classification_result`
+```json
+{
+    "type": "hscode_classification",
+    "classification_result": {
+        "hscode": "8471.30.0000",
+        "confidence_score": 0.95,
+        "classification_reason": "관세율표 해석에 관한 통칙(GRI) 1에 따라 제8471호 자동자료처리기계 및 그 단위기기에 분류됩니다...",
+        "product_name": "스마트폰",
+        "alternative_codes": ["8517.12.0000", "8517.13.0000"],
+        "classified_at": "2025-07-09T11:00:02.789Z"
+    },
+    "metadata": {
+        "source": "hscode_classification_service",
+        "processing_completed": true
+    },
+    "timestamp": "2025-07-09T11:00:02.789Z"
+}
+```
+**설명**: 전문적인 HSCode 분류 결과를 포함합니다. 프론트엔드에서는 이 정보를 별도 카드나 패널로 강조 표시하여 사용자가 쉽게 확인할 수 있도록 해야 합니다.
 
 ---
 
@@ -498,6 +551,26 @@ eventSource.addEventListener('detail_buttons_error', (event) => {
     handleButtonError(errorData);
 });
 
+// HSCode 분석 시작 (신규)
+eventSource.addEventListener('hscode_analysis_start', (event) => {
+    const analysisData = JSON.parse(event.data);
+    // UI 업데이트 로직: HSCode 분석 모드로 전환, 전용 UI 표시
+    initializeHSCodeAnalysisUI(analysisData);
+});
+
+// HSCode 분석 진행 상황 (신규)
+eventSource.addEventListener('hscode_analysis_progress', (event) => {
+    const progressData = JSON.parse(event.data);
+    // UI 업데이트 로직: HSCode 분석 진행률 표시
+    updateHSCodeProgress(progressData.stage, progressData.progress);
+});
+
+// HSCode 분류 결과 (신규)
+eventSource.addEventListener('hscode_classification_result', (event) => {
+    const classificationData = JSON.parse(event.data);
+    // UI 업데이트 로직: HSCode 분류 결과를 별도 카드로 표시
+    displayHSCodeResult(classificationData.classification_result);
+});
 
 // 메시지 완료
 eventSource.addEventListener('chat_message_stop', (event) => {
@@ -516,6 +589,12 @@ export function useChatSSE(chatEndpoint) {
   const [activeTools, setActiveTools] = useState([]); // 현재 진행중인 도구 사용 정보
   const [processingStatus, setProcessingStatus] = useState(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [hsCodeAnalysis, setHsCodeAnalysis] = useState({
+    isActive: false,
+    stage: null,
+    progress: 0,
+    result: null
+  }); // HSCode 분류 관련 상태 (신규)
   // ... (기타 상태: detailButtons, sessionUuid 등)
 
   useEffect(() => {
@@ -531,10 +610,37 @@ export function useChatSSE(chatEndpoint) {
       setActiveTools(prev => prev.filter(tool => tool.tool_use_id !== data.tool_use_id));
     };
 
+    const handleHSCodeAnalysisStart = (event) => {
+      const data = JSON.parse(event.data);
+      setHsCodeAnalysis(prev => ({ ...prev, isActive: true, stage: "시작", progress: 0 }));
+    };
+
+    const handleHSCodeAnalysisProgress = (event) => {
+      const data = JSON.parse(event.data);
+      setHsCodeAnalysis(prev => ({ 
+        ...prev, 
+        stage: data.stage, 
+        progress: data.progress 
+      }));
+    };
+
+    const handleHSCodeClassificationResult = (event) => {
+      const data = JSON.parse(event.data);
+      setHsCodeAnalysis(prev => ({ 
+        ...prev, 
+        result: data.classification_result,
+        isActive: false,
+        progress: 100 
+      }));
+    };
+
     // ... (기타 핸들러: handleContentDelta, handleMessageStart 등)
     
     eventSource.addEventListener('tool_use', handleToolUse);
     eventSource.addEventListener('tool_result', handleToolResult);
+    eventSource.addEventListener('hscode_analysis_start', handleHSCodeAnalysisStart);
+    eventSource.addEventListener('hscode_analysis_progress', handleHSCodeAnalysisProgress);
+    eventSource.addEventListener('hscode_classification_result', handleHSCodeClassificationResult);
     // eventSource.removeEventListener('chat_web_search_results', ...); // 기존 핸들러 제거
 
     // ... (나머지 리스너 등록)
@@ -544,7 +650,7 @@ export function useChatSSE(chatEndpoint) {
     };
   }, [chatEndpoint]);
 
-  return { currentMessage, activeTools, processingStatus, isStreaming };
+  return { currentMessage, activeTools, processingStatus, isStreaming, hsCodeAnalysis };
 }
 ```
 
@@ -584,6 +690,9 @@ eventTypes.forEach(eventType => {
 - [ ] **`processing_status` 이벤트 핸들러 등록 및 UI 연동**
 - [ ] **`tool_use` 이벤트 핸들러 등록 및 UI 연동 (예: "검색 중...")**
 - [ ] **`tool_result` 이벤트 핸들러 등록 및 UI 연동**
+- [ ] **`hscode_analysis_start` 이벤트 핸들러 등록 및 HSCode 분석 UI 모드 전환**
+- [ ] **`hscode_analysis_progress` 이벤트 핸들러 등록 및 진행률 표시**
+- [ ] **`hscode_classification_result` 이벤트 핸들러 등록 및 분류 결과 카드 표시**
 - [ ] `chat_web_search_results` 관련 로직 제거
 - [ ] `detail_buttons_*` 이벤트 핸들러(`start`, `ready`, `complete`, `error`) 및 동적 버튼 생성/관리 로직 구현
 - [ ] 에러 처리 로직 구현 (연결 오류, `detail_buttons_error` 등)
