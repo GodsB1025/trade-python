@@ -1,7 +1,7 @@
 import json
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, AsyncGenerator, Optional
+from typing import Dict, Any, AsyncGenerator, Optional, List
 import uuid
 
 from app.models.schemas import DetailPageInfo, DetailButton
@@ -167,6 +167,18 @@ class SSEEventGenerator:
             "timestamp": self._get_timestamp(),
         }
         return self._format_event("tool_use", event_data)
+
+    def generate_tool_use_end_event(
+        self, tool_name: str, output: Any, tool_use_id: str
+    ) -> str:
+        data = {
+            "type": "tool_use_end",
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "output": output,
+            "timestamp": self._get_timestamp(),
+        }
+        return self._format_event("tool_use_end", data)
 
     def generate_thinking_process_event(self, thought: str) -> str:
         """AI의 사고 과정(Thinking) 이벤트를 생성함"""

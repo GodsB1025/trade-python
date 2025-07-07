@@ -43,14 +43,14 @@ class LLMProvider:
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),  # SecretStr로 변환하여 전달
             temperature=1,
             max_tokens_to_sample=12_000,
-            timeout=None,
+            timeout=600,
             max_retries=2,
             stop=None,
             default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
                 "anthropic-version": "2023-06-01",
             },
-            thinking={"type": "enabled", "budget_tokens": 4_000},
+            thinking={"type": "enabled", "budget_tokens": 6_000},
             rate_limiter=anthropic_rate_limiter,  # 모든 모델에 공유 속도 제한기 적용
         )
 
@@ -136,7 +136,7 @@ class LLMProvider:
             "type": "web_search_20250305",
             "name": "web_search",
             "cache_control": {"type": "ephemeral"},
-            "max_uses": 8,
+            "max_uses": 3,
             "allowed_domains": [
                 # 국제기구 공식 사이트 (최고 신뢰도)
                 "www.wcotradetools.org",
@@ -184,7 +184,6 @@ class LLMProvider:
             stop=None,
             default_headers={
                 "anthropic-beta": "extended-cache-ttl-2025-04-11",
-                "anthropic-version": "2023-06-01",
             },
             thinking={"type": "enabled", "budget_tokens": 14_000},
             rate_limiter=anthropic_rate_limiter,

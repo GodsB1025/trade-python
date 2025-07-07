@@ -28,6 +28,8 @@ from langchain_core.messages import (
     ToolMessage,
     BaseMessage,
 )
+from langchain_core.runnables import Runnable
+from langchain_core.tracers.log_stream import RunLogPatch
 from pydantic import SecretStr
 
 from app.db import crud
@@ -51,6 +53,7 @@ from app.core.llm_provider import llm_provider
 from app.services.parallel_task_manager import ParallelTaskManager
 from app.services.sse_event_generator import SSEEventGenerator
 from app.models import db_models
+from langchain_core.messages import AIMessageChunk
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +317,10 @@ class ChatService:
                 yield event
             extracted_hscode, extracted_product_name = None, None
             if is_hscode_intent:
+                # 상태 업데이트: 상세 정보 준비 시작
+                yield self.sse_generator.generate_processing_status_event(
+                    "HSCode 상세 정보 준비 시작", 2, total_steps, is_sub_step=True
+                )
                 extracted_hscode, extracted_product_name = (
                     await _extract_hscode_from_message(chat_request.message)
                 )
@@ -393,9 +400,34 @@ class ChatService:
             )
 
             # 4. 시스템 프롬프트 및 메시지 구성
-            system_prompt = (
-                "당신은 대한민국의 무역 및 수출입 전문가입니다..."  # 전체 프롬프트 생략
-            )
+            system_prompt = """
+    [1. 역할 정의]
+    당신은 'TrAI-Bot'입니다. 대한민국 중소기업의 수출입 담당자, 특히 이제 막 무역을 시작하는 실무자들을 돕기 위해 설계된, 신뢰할 수 있는 'AI 무역 전문가'이자 '든든한 파트너'입니다. 당신의 목표는 단순한 정보 전달을 넘어, 사용자가 겪는 불안감을 '확신'으로 바꾸어 주는 것입니다.
+
+    [2. 핵심 임무]
+    당신의 핵심 임무는 복잡하고 파편화된 무역 정보의 홍수 속에서, 사용자에게 '명확한 사실'과 '신뢰할 수 있는 출처'에 기반한 '실질적인 정보'를 제공하는 것입니다. 항상 중립적이고 객관적인 사실만을 전달해야 합니다.
+
+    [3. 전문 분야]
+    당신은 아래 분야에 대한 깊이 있는 지식을 갖추고 있습니다.
+    - HS 코드 분류 : 단순 코드 번호뿐만 아니라, 해당 코드로 분류되는 명확한 근거와 유사 코드와의 차이점까지 설명해야 합니다.
+    - 관세 정보 : 기본 관세율, FTA 협정세율, 반덤핑 관세 등 모든 종류의 관세를 포함합니다.
+    - **비관세장벽 (매우 중요)** : 사용자가 놓치기 쉬운 각국의 인증(KC, CE, FCC 등), 기술 표준(TBT), 위생 및 검역(SPS), 환경 규제, 라벨링 및 포장 규정 등을 관세 정보만큼, 혹은 그 이상으로 중요하게 다뤄야 합니다.
+    - 수출입 통관 절차 및 필요 서류 : 각 국가별 통관 프로세스와 필수 서류(Invoice, B/L, C/O 등)를 안내합니다.
+
+    [4. 행동 원칙]
+    당신은 다음 원칙을 반드시 준수해야 합니다.
+    1.  **출처 명시 최우선**: 모든 핵심 정보(HS 코드, 관세율, 규제 내용 등)는 반드시 공신력 있는 출처를 명시해야 합니다. 출처 없이는 답변하지 않습니다. 예: `(출처: 대한민국 관세청, 2025-07-07)`
+    2.  **비관세장벽 강조**: 사용자가 관세만 묻더라도, 해당 품목의 수출입에 영향을 미칠 수 있는 중요한 비관세장벽 정보가 있다면 반드시 함께 언급하여 잠재적 리스크를 알려주십시오.
+    3.  **구조화된 답변**: 사용자가 쉽게 이해할 수 있도록, 답변을 명확한 소제목과 글머리 기호(bullet point)로 구조화하여 제공하십시오.
+    4.  **쉬운 언어 사용**: 전문 용어 사용을 최소화하고, 무역 초보자도 이해할 수 있는 명확하고 간결한 언어로 설명하십시오.
+
+    [5. 제약 조건]
+    - 절대 법적, 재정적 자문을 제공하지 마십시오.
+    - 개인적인 의견이나 추측을 포함하지 마십시오.
+    - 특정 업체나 서비스를 추천하지 마십시오.
+    - 정치적, 종교적으로 민감한 주제에 대해 언급하지 마십시오.
+    - 오직 무역 관련 정보에만 집중하십시오.
+    """
             messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
             messages.extend(previous_messages)
 
@@ -433,81 +465,30 @@ class ChatService:
                 )
             messages.append(current_user_message)
 
-            async for event in chat_model.astream_events(messages, version="v2"):
-                kind = event["event"]
-
-                if kind == "on_chat_model_start":
-                    # Anthropic 'thinking' 이벤트 처리
-                    if "thinking" in event["data"]:
-                        for thought in event["data"]["thinking"]:
-                            yield self.sse_generator.generate_thinking_process_event(
-                                thought
-                            )
-
-                if kind == "on_chat_model_stream":
-                    chunk = event["data"].get("chunk")
-                    if not chunk:
-                        continue
-
-                    # AIMessageChunk의 content가 리스트 형태일 경우 처리 (Anthropic 모델 대응)
-                    if isinstance(chunk.content, list):
-                        for content_block in chunk.content:
-                            if isinstance(content_block, dict):
-                                block_type = content_block.get("type")
-                                if block_type in ["text_delta", "text"]:
-                                    text_content = content_block.get("text", "")
-                                    if text_content:
-                                        final_response_text += text_content
-                                        delta_event = {
-                                            "type": "content_block_delta",
-                                            "index": content_index,
-                                            "delta": {
-                                                "type": "text_delta",
-                                                "text": text_content,
-                                            },
-                                        }
-                                        yield self.sse_generator._format_event(
-                                            "chat_content_delta", delta_event
-                                        )
-                    # 기존 문자열 content 처리 (하위 호환성)
-                    elif isinstance(chunk.content, str) and chunk.content:
-                        final_response_text += chunk.content
-                        delta_event = {
-                            "type": "content_block_delta",
-                            "index": content_index,
-                            "delta": {"type": "text_delta", "text": chunk.content},
-                        }
-                        yield self.sse_generator._format_event(
-                            "chat_content_delta", delta_event
-                        )
-
-                elif kind == "on_tool_start":
-                    tool_name = event["data"].get("name")
-                    tool_input = event["data"].get("input")
-                    run_id = event.get("run_id")
-                    if (
-                        isinstance(tool_name, str)
-                        and isinstance(tool_input, dict)
-                        and run_id
-                    ):
-                        yield self.sse_generator.generate_tool_use_event(
-                            tool_name, tool_input, str(run_id)
-                        )
-
-                elif kind == "on_tool_end" and event.get("name") == "web_search":
-                    output = event["data"].get("output", {})
-                    if isinstance(output, dict):
-                        results = output.get("results", [])
-                        for result in results:
-                            if isinstance(result, dict) and "url" in result:
-                                web_search_urls.append(result["url"])
-                    # 웹 검색 종료 시, 간략한 상태 업데이트 제공
-                    yield self.sse_generator.generate_processing_status_event(
-                        "웹 검색 완료, 답변 생성 중",
-                        step_counter,
-                        total_steps,
-                        is_sub_step=True,
+            # 6-1. 하트비트를 포함한 LLM 스트리밍 처리
+            async for event_type, data in self._stream_llm_with_heartbeat(
+                messages,
+                chat_model,
+                step_counter,
+                total_steps,
+            ):
+                if event_type == "heartbeat":
+                    yield data  # 하트비트 SSE 문자열
+                elif event_type == "text_delta":
+                    final_response_text += data
+                    delta_event = {
+                        "type": "content_block_delta",
+                        "index": content_index,
+                        "delta": {"type": "text_delta", "text": data},
+                    }
+                    yield self.sse_generator._format_event(
+                        "chat_content_delta", delta_event
                     )
+                elif event_type == "tool_start":
+                    yield data  # 도구 사용 시작 SSE 문자열
+                elif event_type == "tool_end":
+                    web_search_urls.extend(data.get("urls", []))
+                    yield data.get("event_str")  # 웹 검색 완료 SSE 문자열
 
             # 7. 스트림 종료 및 후처리
             yield self.sse_generator._format_event(
@@ -569,3 +550,165 @@ class ChatService:
                 {"type": "message_delta", "delta": {"stop_reason": "error"}},
             )
             yield 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'
+
+    async def _stream_llm_with_heartbeat(
+        self,
+        messages: List[BaseMessage],
+        chat_model: Runnable,
+        step_counter: int,
+        total_steps: int,
+        heartbeat_interval: int = 10,
+        tool_timeout: int = 180,
+    ) -> AsyncGenerator[Tuple[str, Any], None]:
+        """
+        LLM 응답을 스트리밍하면서, 응답이 없을 경우 주기적으로 하트비트 이벤트를 전송.
+        도구 사용 중에는 더 긴 타임아웃을 적용.
+        (이벤트 타입, 데이터) 튜플을 반환.
+        """
+        queue: asyncio.Queue[Union[RunLogPatch, Exception, None]] = asyncio.Queue()
+        is_finished = False
+        is_tool_running = False
+        current_timeout = heartbeat_interval
+
+        async def producer():
+            nonlocal is_finished
+            try:
+                async for chunk in chat_model.astream_log(
+                    messages,
+                    include_names=["hscode_llm_with_web_search", "news_chat_model"],
+                ):
+                    await queue.put(chunk)
+            except Exception as e:
+                logger.error(
+                    f"LLM 스트리밍 중 오류 발생 (producer): {e}", exc_info=True
+                )
+                await queue.put(e)
+            finally:
+                is_finished = True
+                await queue.put(None)
+
+        producer_task = asyncio.create_task(producer())
+        active_tool_calls: Dict[str, Dict] = {}
+
+        while not is_finished:
+            try:
+                # 도구 실행 중에는 더 긴 타임아웃 적용
+                timeout = tool_timeout if is_tool_running else heartbeat_interval
+                event = await asyncio.wait_for(queue.get(), timeout=timeout)
+
+                if event is None:
+                    break
+                if isinstance(event, Exception):
+                    raise event
+                if not isinstance(event, RunLogPatch):
+                    continue
+
+                for op in event.ops:
+                    path = op.get("path", "")
+                    value = op.get("value")
+
+                    if op["op"] == "add" and "/streamed_output/-" in path:
+                        if isinstance(value, AIMessageChunk):
+                            text_content = ""
+                            if isinstance(value.content, list):
+                                for content_block in value.content:
+                                    if isinstance(
+                                        content_block, dict
+                                    ) and content_block.get("type") in [
+                                        "text",
+                                        "text_delta",
+                                    ]:
+                                        text_content += content_block.get("text", "")
+                            elif isinstance(value.content, str):
+                                text_content = value.content
+
+                            if text_content:
+                                yield "text_delta", text_content
+
+                    elif op["op"] == "add" and path.endswith("/tool_calls/-"):
+                        if value and "id" in value:
+                            tool_call_id = value["id"]
+                            active_tool_calls[tool_call_id] = value
+                            if value.get("name") == "web_search":
+                                is_tool_running = True
+                                event_str = self.sse_generator.generate_tool_use_event(
+                                    "web_search", value.get("args", {}), tool_call_id
+                                )
+                                yield "tool_start", event_str
+
+                    elif (
+                        op["op"] == "add"
+                        and path.startswith("/logs/")
+                        and "tool_calls" in path
+                        and path.endswith("/output")
+                    ):
+                        # Extract tool_call_id from path
+                        match = re.search(r"tool_calls/(\d+)", path)
+                        if match:
+                            # This part is tricky as tool_call_id is not directly available.
+                            # We're relying on the order which is not robust.
+                            # A better approach would be to get run_id and associate.
+                            # For now, we find the first active tool call.
+
+                            active_tool_id = (
+                                next(iter(active_tool_calls))
+                                if active_tool_calls
+                                else None
+                            )
+                            if active_tool_id:
+                                tool_call_info = active_tool_calls.pop(active_tool_id)
+                                tool_name = tool_call_info.get("name")
+
+                                if tool_name:
+                                    is_tool_running = False  # Reset timeout
+
+                                    event_str = (
+                                        self.sse_generator.generate_tool_use_end_event(
+                                            tool_name, value, active_tool_id
+                                        )
+                                    )
+
+                                    urls = []
+                                    if tool_name == "web_search" and isinstance(
+                                        value, str
+                                    ):
+                                        try:
+                                            tool_output = json.loads(value)
+                                            results = tool_output.get("results", [])
+                                            for res in results:
+                                                if (
+                                                    isinstance(res, dict)
+                                                    and "url" in res
+                                                ):
+                                                    urls.append(res["url"])
+                                        except json.JSONDecodeError:
+                                            pass
+
+                                    yield "tool_end", {
+                                        "urls": urls,
+                                        "event_str": event_str,
+                                    }
+                                else:
+                                    # tool_name이 없는 경우에 대한 안전장치
+                                    is_tool_running = False
+
+            except asyncio.TimeoutError:
+                if is_tool_running:
+                    # 도구 실행 중 타임아웃은 정상일 수 있으므로 하트비트만 보냄
+                    event_str = self.sse_generator.generate_processing_status_event(
+                        "외부 도구(웹 검색 등)를 사용하여 정보를 탐색하고 있습니다. 최대 3분까지 소요될 수 있습니다.",
+                        step_counter,
+                        total_steps,
+                        is_sub_step=True,
+                    )
+                else:
+                    # 일반 하트비트
+                    event_str = self.sse_generator.generate_processing_status_event(
+                        "AI가 답변을 생성중입니다. 잠시만 기다려주세요...",
+                        step_counter,
+                        total_steps,
+                        is_sub_step=True,
+                    )
+                yield "heartbeat", event_str
+
+        await producer_task
