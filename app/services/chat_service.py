@@ -490,6 +490,8 @@ class ChatService:
                     yield self.sse_generator._format_event(
                         "chat_content_delta", delta_event
                     )
+                elif event_type == "thinking":
+                    yield data  # AI의 사고 과정 SSE 문자열
                 elif event_type == "tool_start":
                     yield data  # 도구 사용 시작 SSE 문자열
                 elif event_type == "tool_end":
@@ -564,7 +566,7 @@ class ChatService:
         step_counter: int,
         total_steps: int,
         heartbeat_interval: int = 10,
-        tool_timeout: int = 180,
+        tool_timeout: int = 300,
     ) -> AsyncGenerator[Tuple[str, Any], None]:
         """
         LLM 응답을 스트리밍하면서, 응답이 없을 경우 주기적으로 하트비트 이벤트를 전송.
@@ -630,6 +632,12 @@ class ChatService:
 
                             if text_content:
                                 yield "text_delta", text_content
+
+                            if thought := value.additional_kwargs.get("thinking"):
+                                if isinstance(thought, str) and thought.strip():
+                                    yield "thinking", self.sse_generator.generate_thinking_process_event(
+                                        thought
+                                    )
 
                     elif op["op"] == "add" and path.endswith("/tool_calls/-"):
                         if value and "id" in value:

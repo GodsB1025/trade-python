@@ -300,7 +300,7 @@ class HSCodeClassificationService:
     </persona>
 
     <instructions>
-        You are given a user's query about an HS Code. Analyze it and generate a structured response in Korean within the `<final_response>` tag.
+        You are given a user's query about an HS Code. Analyze it and generate a structured response in Korean.
 
         **Critical Analysis Protocol:**
         1.  **Best-Effort Analysis on Ambiguity**: Even if the user's query is vague, you MUST perform a preliminary best-effort analysis. Do not refuse to answer.
@@ -314,9 +314,9 @@ class HSCodeClassificationService:
             * **The Reason (왜)**: Why you did it (e.g., "Because the product is a composite good and its most specific description could not be determined").
             * **The Basis (판단의 근거)**: The specific evidence you are relying on (e.g., "Based on the product's functional core, which is the XXX component").
             * **The Source Name (출처 이름)**: The name of the source for your basis (e.g., "This principle is from the WCO Explanatory Notes" or "A similar case was found in a ruling from the U.S. International Trade Commission").
-        5.  **Strict Sequential GIR Application**: Apply the GIR in the exact sequence from 1 to 6. You will articulate your application of each rule in the `<reasoning_process>`.
-        6.  **Formulate Clarification Questions**: After your analysis, identify key missing details and formulate specific, targeted questions for the user in the `<clarification_questions>` section.
-        7.  **Construct Final Response**: Based on your rigorous analysis, construct the final response in Korean using the XML structure provided in `<output_format>`.
+        5.  **Strict Sequential GIR Application**: Apply the GIR in the exact sequence from 1 to 6. You will articulate your application of each rule in the reasoning process.
+        6.  **Formulate Clarification Questions**: After your analysis, identify key missing details and formulate specific, targeted questions for the user in the clarification questions section.
+        7.  **Construct Final Response**: Based on your rigorous analysis, construct the final response in Korean using the Markdown format provided in `<output_format>`.
     </instructions>
 
     <user_query>
@@ -324,58 +324,48 @@ class HSCodeClassificationService:
     </user_query>
 
     <output_format>
-        You MUST provide your response exclusively in the following XML format. The content inside the tags must be in Korean.
+        You MUST provide your response exclusively in the following Markdown format. The content must be in Korean.
 
-        <final_response>
-            <preliminary_guess>
-                <code>[가장 유력하게 예상되는 HSCode]</code>
-            </preliminary_guess>
+        # HS Code 분석 결과
 
-            <final_classification>
-                <product_name>[분석한 제품명]</product_name>
-                <hscode>[최종 확정된 HSCode]</hscode>
-                <description>[HSCode에 해당하는 공식 품목 설명]</description>
-                <source_of_information>[분석에 사용된 주요 정보 출처의 '이름'들을 명시 (예: 관세법령정보포털, WCO HS 해설서, 미국 국제무역위원회). URL은 포함하지 않음.]</source_of_information>
-            </final_classification>
+        ## 1. 예상 HS Code
+        - **가장 유력한 HS Code:** `[가장 유력하게 예상되는 HSCode]`
 
-            <reasoning_process>
-                <step rule="GIR 1: 품목의 본질 및 주 규정 검토">
-                    <action>제품의 핵심 특성을 '[핵심 특성]'으로 정의하고, 관련 '류(Chapter) [류 번호]'를 검토합니다.</action>
-                    <reason>그 이유는 제품의 주된 용도와 재질이 해당 류의 분류 범위에 속하기 때문입니다.</reason>
-                    <basis>판단의 근거는 해당 류의 '주 규정'이며, 웹 검색 결과 '[출처 이름]'에서 제공하는 해설서 내용이 이를 뒷받침합니다.</basis>
-                </step>
-                <step rule="GIR 3(b): 본질적 특성 분석">
-                    <action>통칙 3(b) '본질적 특성' 원칙에 따라, 제품의 여러 구성요소 중 '[핵심 부품/재료]'를 기준으로 분류합니다.</action>
-                    <reason>왜냐하면 '[핵심 부품/재료]'가 제품의 핵심 기능인 '[핵심 기능]'을 수행하며, 가치와 중량 면에서도 가장 중요하기 때문입니다.</reason>
-                    <basis>이러한 판단은 'WCO HS 해설서'에서 제시하는 본질적 특성 결정 기준에 근거하며, '미국 국제무역위원회'의 유사 품목 분류 판례(Ruling No. XXXX)에서 확인된 바 있습니다.</basis>
-                </step>
-                </reasoning_process>
+        ## 2. 최종 분류 결과
+        - **제품명:** [분석한 제품명]
+        - **HS Code:** `[최종 확정된 HSCode]`
+        - **설명:** [HSCode에 해당하는 공식 품목 설명]
+        - **주요 정보 출처:** [분석에 사용된 주요 정보 출처의 '이름'들을 명시 (예: 관세법령정보포털, WCO HS 해설서, 미국 국제무역위원회). URL은 포함하지 않음.]
+
+        ## 3. 분류 근거 (Reasoning Process)
+        ### 통칙(GIR) 적용 단계
+        - **GIR 1: 품목의 본질 및 주 규정 검토**
+          - **수행:** 제품의 핵심 특성을 '[핵심 특성]'으로 정의하고, 관련 '류(Chapter) [류 번호]'를 검토합니다.
+          - **이유:** 제품의 주된 용도와 재질이 해당 류의 분류 범위에 속하기 때문입니다.
+          - **판단 근거:** 해당 류의 '주 규정'이며, 웹 검색 결과 '[출처 이름]'에서 제공하는 해설서 내용이 이를 뒷받침합니다.
+        - **GIR 3(b): 본질적 특성 분석**
+          - **수행:** 통칙 3(b) '본질적 특성' 원칙에 따라, 제품의 여러 구성요소 중 '[핵심 부품/재료]'를 기준으로 분류합니다.
+          - **이유:** '[핵심 부품/재료]'가 제품의 핵심 기능인 '[핵심 기능]'을 수행하며, 가치와 중량 면에서도 가장 중요하기 때문입니다.
+          - **판단 근거:** 'WCO HS 해설서'에서 제시하는 본질적 특성 결정 기준에 근거하며, '미국 국제무역위원회'의 유사 품목 분류 판례(Ruling No. XXXX)에서 확인된 바 있습니다.
             
-            <non_tariff_barriers>
-                <summary>[해당 품목 및 국가에 대한 비관세 장벽 조사 결과 요약. (국가 정보가 없을 시 일반적인 내용 서술)]</summary>
-                <barriers>
-                    <barrier type="인증 및 허가">[웹 검색을 통해 확인된 필요한 인증이나 수입 허가 사항. (출처: OOO 기관 웹사이트)]</barrier>
-                    <barrier type="검역 요건 (SPS)">[농축산물, 식품 등의 위생 및 검역 관련 필수 요건. (출처: OOO 국가 식품의약품안전처)]</barrier>
-                    <barrier type="기술 장벽 (TBT)">[제품 표준, 기술 규정 등 무역에 영향을 미치는 기술적 요건. (출처: OOO 국가 표준원)]</barrier>
-                    <barrier type="라벨링 및 포장">[필수 기재사항, 언어 등 현지 라벨링 규정. (출처: OOO 국가 소비자보호법)]</barrier>
-                </barriers>
-            </non_tariff_barriers>
+        ## 4. 비관세장벽 (Non-Tariff Barriers)
+        - **요약:** [해당 품목 및 국가에 대한 비관세 장벽 조사 결과 요약. (국가 정보가 없을 시 일반적인 내용 서술)]
+        - **주요 장벽:**
+          - **인증 및 허가:** [웹 검색을 통해 확인된 필요한 인증이나 수입 허가 사항. (출처: OOO 기관 웹사이트)]
+          - **검역 요건 (SPS):** [농축산물, 식품 등의 위생 및 검역 관련 필수 요건. (출처: OOO 국가 식품의약품안전처)]
+          - **기술 장벽 (TBT):** [제품 표준, 기술 규정 등 무역에 영향을 미치는 기술적 요건. (출처: OOO 국가 표준원)]
+          - **라벨링 및 포장:** [필수 기재사항, 언어 등 현지 라벨링 규정. (출처: OOO 국가 소비자보호법)]
 
-            <alternative_codes>
-                <alternative>
-                    <code>[고려되었지만 기각된 다른 HSCode]</code>
-                    <description>[해당 코드의 품목 설명]</description>
-                    <reason_for_rejection>[해당 코드를 선택하지 않은 이유와 법적 근거 (예: 'GRI 3(a) 원칙에 따라 더 구체적인 표현인 OOOO호에 분류해야 함. 근거: WCO 해설서')]</reason_for_rejection>
-                </alternative>
-            </alternative_codes>
+        ## 5. 검토된 다른 HS Code
+        - **HS Code:** `[고려되었지만 기각된 다른 HSCode]`
+          - **설명:** [해당 코드의 품목 설명]
+          - **기각 사유:** [해당 코드를 선택하지 않은 이유와 법적 근거 (예: 'GRI 3(a) 원칙에 따라 더 구체적인 표현인 OOOO호에 분류해야 함. 근거: WCO 해설서')]
 
-            <clarification_questions>
-                <intro>현재 주신 정보를 바탕으로 최선의 분석을 제공해 드렸습니다. 더 정확한 HSCode와 규제 정보 분석을 위해 아래 정보를 추가로 알려주시겠어요?</intro>
-                <question>[AI가 생성한 구체적인 질문 1 (예: 제품의 정확한 재질(성분 함량 포함)은 무엇인가요?)]</question>
-                <question>[AI가 생성한 구체적인 질문 2 (예: 수출하려는 대상 국가를 알려주세요.)]</question>
-                <question>[AI가 생성한 구체적인 질문 3 (예: 완제품 형태로 최종 소비자에게 판매되는 소매 포장 상태인가요?)]</question>
-            </clarification_questions>
-        </final_response>
+        ## 6. 추가 질문
+        > 현재 주신 정보를 바탕으로 최선의 분석을 제공해 드렸습니다. 더 정확한 HSCode와 규제 정보 분석을 위해 아래 정보를 추가로 알려주시겠어요?
+        - [AI가 생성한 구체적인 질문 1 (예: 제품의 정확한 재질(성분 함량 포함)은 무엇인가요?)]
+        - [AI가 생성한 구체적인 질문 2 (예: 수출하려는 대상 국가를 알려주세요.)]
+        - [AI가 생성한 구체적인 질문 3 (예: 완제품 형태로 최종 소비자에게 판매되는 소매 포장 상태인가요?)]
     </output_format>
 </prompt>
 """
