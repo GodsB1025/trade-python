@@ -15,7 +15,7 @@ from typing import (
 )
 import uuid
 from datetime import datetime
-
+from langchain_core.output_parsers import StrOutputParser
 from fastapi import BackgroundTasks
 from fastapi.responses import JSONResponse
 from langchain_core.documents import Document
@@ -341,7 +341,7 @@ class ChatService:
                 yield event
 
             if is_hscode_intent:
-                chat_model = llm_provider.hscode_llm_with_web_search
+                chat_model = llm_provider.hscode_chat_model
             else:
                 chat_model = llm_provider.news_chat_model
 
@@ -503,6 +503,9 @@ class ChatService:
                 if event_type == "heartbeat":
                     yield data  # 하트비트 SSE 문자열
                 elif event_type == "text_delta":
+                    if not data:  # 빈 텍스트 델타는 무시
+                        continue
+
                     final_response_text += data
                     delta_event = {
                         "type": "content_block_delta",
@@ -593,7 +596,7 @@ class ChatService:
                 "chat_message_delta",
                 {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
             )
-            yield 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'
+            yield self.sse_generator.generate_stream_end_event()
 
         except Exception as e:
             logger.error(f"채팅 스트림 처리 중 치명적 오류 발생: {e}", exc_info=True)
@@ -615,7 +618,7 @@ class ChatService:
                 "chat_message_delta",
                 {"type": "message_delta", "delta": {"stop_reason": "error"}},
             )
-            yield 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'
+            yield self.sse_generator.generate_stream_end_event()
 
     async def _stream_llm_with_heartbeat(
         self,
@@ -623,164 +626,119 @@ class ChatService:
         chat_model: Runnable,
         step_counter: int,
         total_steps: int,
-        heartbeat_interval: int = 10,
+        heartbeat_interval: int = 15,
         tool_timeout: int = 300,
     ) -> AsyncGenerator[Tuple[str, Any], None]:
         """
         LLM 응답을 스트리밍하면서, 응답이 없을 경우 주기적으로 하트비트 이벤트를 전송.
-        도구 사용 중에는 더 긴 타임아웃을 적용.
+        `astream_events` API (v2)를 사용하여 이벤트 기반으로 처리함.
         (이벤트 타입, 데이터) 튜플을 반환.
         """
-        queue: asyncio.Queue[Union[RunLogPatch, Exception, None]] = asyncio.Queue()
-        is_finished = False
         is_tool_running = False
-        current_timeout = heartbeat_interval
+        last_event_time = time.time()
+        web_search_args = {}
 
-        async def producer():
-            nonlocal is_finished
-            try:
-                async for chunk in chat_model.astream_log(
-                    messages,
-                    include_names=["hscode_llm_with_web_search", "news_chat_model"],
-                ):
-                    await queue.put(chunk)
-            except Exception as e:
-                logger.error(
-                    f"LLM 스트리밍 중 오류 발생 (producer): {e}", exc_info=True
-                )
-                await queue.put(e)
-            finally:
-                is_finished = True
-                await queue.put(None)
+        try:
+            async for event in chat_model.astream_events(
+                messages,
+                version="v2",
+                # include_names는 특정 컴포넌트만 추적하므로, 전체 체인의 출력을 보장하기 위해 제거
+                # include_names=["hscode_llm_with_web_search", "news_chat_model"],
+            ):
+                last_event_time = time.time()
+                kind = event["event"]
+                name = event.get("name")
 
-        producer_task = asyncio.create_task(producer())
-        active_tool_calls: Dict[str, Dict] = {}
+                if kind == "on_chain_stream":
+                    # StrOutputParser가 적용된 최종 체인의 출력을 스트리밍
+                    chunk = event["data"].get("chunk")
+                    if isinstance(chunk, str):
+                        yield "text_delta", chunk
 
-        while not is_finished:
-            try:
-                # 도구 실행 중에는 더 긴 타임아웃 적용
-                timeout = tool_timeout if is_tool_running else heartbeat_interval
-                event = await asyncio.wait_for(queue.get(), timeout=timeout)
-
-                if event is None:
-                    break
-                if isinstance(event, Exception):
-                    raise event
-                if not isinstance(event, RunLogPatch):
-                    continue
-
-                for op in event.ops:
-                    path = op.get("path", "")
-                    value = op.get("value")
-
-                    if op["op"] == "add" and "/streamed_output/-" in path:
-                        if isinstance(value, AIMessageChunk):
-                            text_content = ""
-                            if isinstance(value.content, list):
-                                for content_block in value.content:
-                                    if isinstance(
-                                        content_block, dict
-                                    ) and content_block.get("type") in [
-                                        "text",
-                                        "text_delta",
-                                    ]:
-                                        text_content += content_block.get("text", "")
-                            elif isinstance(value.content, str):
-                                text_content = value.content
-
-                            if text_content:
-                                yield "text_delta", text_content
-
-                            if thought := value.additional_kwargs.get("thinking"):
-                                if isinstance(thought, str) and thought.strip():
-                                    yield "thinking", self.sse_generator.generate_thinking_process_event(
-                                        thought
-                                    )
-
-                    elif op["op"] == "add" and path.endswith("/tool_calls/-"):
-                        if value and "id" in value:
-                            tool_call_id = value["id"]
-                            active_tool_calls[tool_call_id] = value
-                            if value.get("name") == "web_search":
-                                is_tool_running = True
-                                event_str = self.sse_generator.generate_tool_use_event(
-                                    "web_search", value.get("args", {}), tool_call_id
+                elif kind == "on_chat_model_stream":
+                    if "chunk" in event["data"]:
+                        chunk = event["data"]["chunk"]
+                        # Anthropic 'thinking' 블록 처리
+                        if thought := chunk.additional_kwargs.get("thinking"):
+                            if isinstance(thought, str) and thought.strip():
+                                yield "thinking", self.sse_generator.generate_thinking_process_event(
+                                    thought
                                 )
-                                yield "tool_start", event_str
 
-                    elif (
-                        op["op"] == "add"
-                        and path.startswith("/logs/")
-                        and "tool_calls" in path
-                        and path.endswith("/output")
-                    ):
-                        # Extract tool_call_id from path
-                        match = re.search(r"tool_calls/(\d+)", path)
-                        if match:
-                            # This part is tricky as tool_call_id is not directly available.
-                            # We're relying on the order which is not robust.
-                            # A better approach would be to get run_id and associate.
-                            # For now, we find the first active tool call.
+                elif kind == "on_tool_start" and name == "web_search":
+                    is_tool_running = True
+                    tool_input = event["data"].get("input", {})
+                    if isinstance(tool_input, dict):
+                        web_search_args = tool_input
+                        query = tool_input.get("query", "관련 정보")
+                        status_message = (
+                            f"실시간 웹 검색을 시작합니다: '{query[:50]}...'"
+                        )
+                        event_str = self.sse_generator.generate_processing_status_event(
+                            status_message,
+                            step_counter,
+                            total_steps,
+                            is_sub_step=True,
+                        )
+                        yield "thinking", event_str
 
-                            active_tool_id = (
-                                next(iter(active_tool_calls))
-                                if active_tool_calls
-                                else None
+                    event_str = self.sse_generator.generate_tool_use_event(
+                        "web_search", web_search_args, event["run_id"]
+                    )
+                    yield "tool_start", event_str
+
+                elif kind == "on_tool_end" and name == "web_search":
+                    is_tool_running = False
+                    output = event["data"].get("output")
+                    urls = []
+                    if isinstance(output, str):
+                        try:
+                            tool_output = json.loads(output)
+                            results = tool_output.get("results", [])
+                            urls.extend(
+                                r["url"]
+                                for r in results
+                                if isinstance(r, dict) and "url" in r
                             )
-                            if active_tool_id:
-                                tool_call_info = active_tool_calls.pop(active_tool_id)
-                                tool_name = tool_call_info.get("name")
+                        except json.JSONDecodeError:
+                            logger.warning("웹 검색 결과 JSON 파싱 실패")
+                            pass
 
-                                if tool_name:
-                                    is_tool_running = False  # Reset timeout
+                    status_message = f"웹 검색 완료. {len(urls)}개의 출처를 찾았습니다."
+                    event_str_status = (
+                        self.sse_generator.generate_processing_status_event(
+                            status_message,
+                            step_counter,
+                            total_steps,
+                            is_sub_step=True,
+                        )
+                    )
+                    yield "thinking", event_str_status
 
-                                    event_str = (
-                                        self.sse_generator.generate_tool_use_end_event(
-                                            tool_name, value, active_tool_id
-                                        )
-                                    )
+                    event_str_tool = self.sse_generator.generate_tool_use_end_event(
+                        "web_search", output, event["run_id"]
+                    )
+                    yield "tool_end", {"urls": urls, "event_str": event_str_tool}
 
-                                    urls = []
-                                    if tool_name == "web_search" and isinstance(
-                                        value, str
-                                    ):
-                                        try:
-                                            tool_output = json.loads(value)
-                                            results = tool_output.get("results", [])
-                                            for res in results:
-                                                if (
-                                                    isinstance(res, dict)
-                                                    and "url" in res
-                                                ):
-                                                    urls.append(res["url"])
-                                        except json.JSONDecodeError:
-                                            pass
+                # 주기적인 하트비트 (응답이 너무 길어질 경우)
+                if time.time() - last_event_time > heartbeat_interval:
+                    if is_tool_running:
+                        message = "외부 도구(웹 검색 등)를 사용하여 정보를 탐색하고 있습니다. 최대 3분까지 소요될 수 있습니다."
+                    else:
+                        message = "AI가 답변을 생성중입니다. 잠시만 기다려주세요..."
 
-                                    yield "tool_end", {
-                                        "urls": urls,
-                                        "event_str": event_str,
-                                    }
-                                else:
-                                    # tool_name이 없는 경우에 대한 안전장치
-                                    is_tool_running = False
-
-            except asyncio.TimeoutError:
-                if is_tool_running:
-                    # 도구 실행 중 타임아웃은 정상일 수 있으므로 하트비트만 보냄
                     event_str = self.sse_generator.generate_processing_status_event(
-                        "외부 도구(웹 검색 등)를 사용하여 정보를 탐색하고 있습니다. 최대 3분까지 소요될 수 있습니다.",
+                        message,
                         step_counter,
                         total_steps,
                         is_sub_step=True,
                     )
-                else:
-                    # 일반 하트비트
-                    event_str = self.sse_generator.generate_processing_status_event(
-                        "AI가 답변을 생성중입니다. 잠시만 기다려주세요...",
-                        step_counter,
-                        total_steps,
-                        is_sub_step=True,
-                    )
-                yield "heartbeat", event_str
+                    yield "heartbeat", event_str
+                    last_event_time = time.time()
 
-        await producer_task
+        except Exception as e:
+            logger.error(
+                f"LLM 스트리밍 중 오류 발생 (astream_events): {e}", exc_info=True
+            )
+            # 여기서 예외를 다시 발생시켜 상위 핸들러가 처리하도록 할 수 있음
+            raise

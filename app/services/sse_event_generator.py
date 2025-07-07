@@ -204,3 +204,7 @@ class SSEEventGenerator:
             "timestamp": self._get_timestamp(),
         }
         return self._format_event("hscode_inferred", data)
+
+    def generate_stream_end_event(self) -> str:
+        """스트림 종료 이벤트를 생성함"""
+        return 'event: chat_message_stop\ndata: {"type":"message_stop"}\n\n'

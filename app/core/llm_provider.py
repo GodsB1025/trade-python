@@ -6,6 +6,11 @@ from langchain_voyageai import VoyageAIEmbeddings
 from langchain_postgres import PGEngine, PGVectorStore
 from pydantic import SecretStr
 from typing import Optional
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import Runnable
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import StrOutputParser
 
 from app.core.config import settings
 
@@ -206,21 +211,13 @@ class LLMProvider:
 
         # 7. 용도별 LLM 모델 최종 생성
         # 모든 모델에 재시도 로직을 적용하여 안정성 강화
-        self.news_chat_model = self.news_llm_with_native_search.with_retry(
-            **self.retry_config
-        )
+        self.news_chat_model = (
+            self.news_llm_with_native_search | StrOutputParser()
+        ).with_retry(**self.retry_config)
         self.monitoring_chat_model = monitoring_base_llm.with_retry(**self.retry_config)
-        self.hscode_chat_model = self.hscode_base_llm.with_retry(**self.retry_config)
-
-        # 하위 호환성을 위해 news_llm_with_native_search도 동일하게 retry가 적용된 모델을 참조하도록 함
-        self.news_llm_with_native_search = self.news_chat_model
-
-        self.hscode_llm_with_web_search = self.hscode_llm_with_web_search.with_retry(
-            **self.retry_config
-        )
-
-        # monitoring_llm_with_native_search는 서비스 레이어에서 직접 생성하도록 책임을 위임함.
-        # self.monitoring_llm_with_native_search = monitoring_model_with_tools_bound
+        self.hscode_chat_model = (
+            self.hscode_llm_with_web_search | StrOutputParser()
+        ).with_retry(**self.retry_config)
 
         # 7. Voyage AI 임베딩 모델 초기화
         if not settings.VOYAGE_API_KEY:
