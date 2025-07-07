@@ -523,33 +523,59 @@ class ChatService:
                     web_search_urls.extend(data.get("urls", []))
                     yield data.get("event_str")  # 웹 검색 완료 SSE 문자열
 
+                    # hscode_classification 도구의 결과를 처리
+                    if data.get("tool_name") == "hscode_classification":
+                        tool_output = data.get("output")
+                        if tool_output:
+                            try:
+                                # 도구 출력이 JSON 문자열일 수 있으므로 파싱
+                                if isinstance(tool_output, str):
+                                    tool_output = json.loads(tool_output)
+
+                                final_hscode = tool_output.get("hscode")
+                                product_name = tool_output.get("product_name")
+
+                                if final_hscode:
+                                    logger.info(
+                                        f"Tool-based HSCode 추출 성공: {final_hscode}, 품목명: {product_name}"
+                                    )
+                                    yield self.sse_generator.generate_hscode_inferred_event(
+                                        final_hscode, product_name
+                                    )
+                                else:
+                                    logger.warning(
+                                        "Tool-based HSCode 추출 실패: hscode 필드 없음"
+                                    )
+                            except (json.JSONDecodeError, AttributeError) as e:
+                                logger.error(f"HSCode 도구 출력 파싱 실패: {e}")
+
             # 7. 스트리밍 종료 및 후처리
             yield self.sse_generator._format_event(
                 "chat_content_stop",
                 {"type": "content_block_stop", "index": content_index},
             )
 
-            # 7-1. 최종 응답에서 HSCode 추출 및 이벤트 전송
-            if is_hscode_intent and final_response_text:
-                hscode_match = re.search(
-                    r"(?:가장 유력한 HS Code|HS Code|HS CODE)[:\s`]*(\d{4}\.\d{2}(?:\.\d{4})?|\d{6,10})",
-                    final_response_text,
-                    re.IGNORECASE,
-                )
-                if hscode_match:
-                    final_hscode = hscode_match.group(1)
-                    # 품목명은 사용자 메시지 기반으로 다시 추출
-                    _, product_name_for_event = await _extract_hscode_from_message(
-                        chat_request.message
-                    )
-                    logger.info(
-                        f"최종 응답에서 HSCode 추출 성공: {final_hscode}, 품목명: {product_name_for_event}"
-                    )
-                    yield self.sse_generator.generate_hscode_inferred_event(
-                        final_hscode, product_name_for_event
-                    )
-                else:
-                    logger.warning("최종 응답에서 HSCode를 추출하지 못했습니다.")
+            # 7-1. 최종 응답에서 HSCode 추출 및 이벤트 전송 (Tool 기반으로 변경되어 아래 로직 제거)
+            # if is_hscode_intent and final_response_text:
+            #     hscode_match = re.search(
+            #         r"(?:가장 유력한 HS Code|HS Code|HS CODE)[:\s`]*(\d{4}\.\d{2}(?:\.\d{4})?|\d{6,10})",
+            #         final_response_text,
+            #         re.IGNORECASE,
+            #     )
+            #     if hscode_match:
+            #         final_hscode = hscode_match.group(1)
+            #         # 품목명은 사용자 메시지 기반으로 다시 추출
+            #         _, product_name_for_event = await _extract_hscode_from_message(
+            #             chat_request.message
+            #         )
+            #         logger.info(
+            #             f"최종 응답에서 HSCode 추출 성공: {final_hscode}, 품목명: {product_name_for_event}"
+            #         )
+            #         yield self.sse_generator.generate_hscode_inferred_event(
+            #             final_hscode, product_name_for_event
+            #         )
+            #     else:
+            #         logger.warning("최종 응답에서 HSCode를 추출하지 못했습니다.")
 
             # 7-2. 웹 검색 결과가 있으면 이벤트 전송
             if web_search_urls:
@@ -665,7 +691,7 @@ class ChatService:
                                     thought
                                 )
 
-                elif kind == "on_tool_start" and name == "web_search":
+                elif kind == "on_tool_start":
                     is_tool_running = True
                     tool_input = event["data"].get("input", {})
                     if isinstance(tool_input, dict):
@@ -683,42 +709,54 @@ class ChatService:
                         yield "thinking", event_str
 
                     event_str = self.sse_generator.generate_tool_use_event(
-                        "web_search", web_search_args, event["run_id"]
+                        name, web_search_args, event["run_id"]
                     )
                     yield "tool_start", event_str
 
-                elif kind == "on_tool_end" and name == "web_search":
+                elif (
+                    kind == "on_tool_end"
+                ):  # and name == "web_search": <- web_search뿐만 아니라 모든 도구 처리
                     is_tool_running = False
                     output = event["data"].get("output")
+                    tool_name = name
                     urls = []
-                    if isinstance(output, str):
-                        try:
-                            tool_output = json.loads(output)
-                            results = tool_output.get("results", [])
-                            urls.extend(
-                                r["url"]
-                                for r in results
-                                if isinstance(r, dict) and "url" in r
-                            )
-                        except json.JSONDecodeError:
-                            logger.warning("웹 검색 결과 JSON 파싱 실패")
-                            pass
 
-                    status_message = f"웹 검색 완료. {len(urls)}개의 출처를 찾았습니다."
-                    event_str_status = (
-                        self.sse_generator.generate_processing_status_event(
-                            status_message,
-                            step_counter,
-                            total_steps,
-                            is_sub_step=True,
+                    if tool_name == "web_search":
+                        if isinstance(output, str):
+                            try:
+                                tool_output = json.loads(output)
+                                results = tool_output.get("results", [])
+                                urls.extend(
+                                    r["url"]
+                                    for r in results
+                                    if isinstance(r, dict) and "url" in r
+                                )
+                            except json.JSONDecodeError:
+                                logger.warning("웹 검색 결과 JSON 파싱 실패")
+                                pass
+
+                        status_message = (
+                            f"웹 검색 완료. {len(urls)}개의 출처를 찾았습니다."
                         )
-                    )
-                    yield "thinking", event_str_status
+                        event_str_status = (
+                            self.sse_generator.generate_processing_status_event(
+                                status_message,
+                                step_counter,
+                                total_steps,
+                                is_sub_step=True,
+                            )
+                        )
+                        yield "thinking", event_str_status
 
                     event_str_tool = self.sse_generator.generate_tool_use_end_event(
-                        "web_search", output, event["run_id"]
+                        tool_name, output, event["run_id"]
                     )
-                    yield "tool_end", {"urls": urls, "event_str": event_str_tool}
+                    yield "tool_end", {
+                        "urls": urls,
+                        "event_str": event_str_tool,
+                        "tool_name": tool_name,
+                        "output": output,
+                    }
 
                 # 주기적인 하트비트 (응답이 너무 길어질 경우)
                 if time.time() - last_event_time > heartbeat_interval:
