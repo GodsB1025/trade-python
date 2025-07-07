@@ -327,6 +327,7 @@ class ChatService:
             history: Optional[PostgresChatMessageHistory] = None
             session_obj: Optional[db_models.ChatSession] = None
             current_session_uuid: Optional[str] = None
+            web_search_urls: List[str] = []
 
             if user_id:
                 try:
@@ -494,6 +495,12 @@ class ChatService:
                         )
 
                 elif kind == "on_tool_end" and event.get("name") == "web_search":
+                    output = event["data"].get("output", {})
+                    if isinstance(output, dict):
+                        results = output.get("results", [])
+                        for result in results:
+                            if isinstance(result, dict) and "url" in result:
+                                web_search_urls.append(result["url"])
                     # 웹 검색 종료 시, 간략한 상태 업데이트 제공
                     yield self.sse_generator.generate_processing_status_event(
                         "웹 검색 완료, 답변 생성 중",
@@ -507,6 +514,17 @@ class ChatService:
                 "chat_content_stop",
                 {"type": "content_block_stop", "index": content_index},
             )
+
+            if web_search_urls:
+                yield self.sse_generator._format_event(
+                    "web_search_results",
+                    {
+                        "type": "web_search_results",
+                        "urls": web_search_urls,
+                        "timestamp": self.sse_generator._get_timestamp(),
+                    },
+                )
+
             if detail_page_generator:
                 async for event in detail_page_generator:
                     yield event
