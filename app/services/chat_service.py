@@ -431,6 +431,8 @@ class ChatService:
                     ]
                 )
             else:
+                logger.info("일반 뉴스/채팅용  하드코딩된 ChatAnthropic 모델")
+
                 # 일반 뉴스/채팅용 하드코딩된 ChatAnthropic 모델
                 chat_model = ChatAnthropic(
                     model_name=settings.ANTHROPIC_MODEL,
@@ -572,68 +574,10 @@ class ChatService:
             hscode_classification_result = None
 
             if is_hscode_intent:
-                # HSCode 분석 시작 이벤트 전송
-                yield self.sse_generator.generate_hscode_analysis_start_event()
-                await asyncio.sleep(0.1)
-
-                try:
-                    # HSCode 분류 수행
-                    extracted_hscode, extracted_product_name = (
-                        await _extract_hscode_from_message(chat_request.message)
-                    )
-
-                    # 진행 상황 이벤트
-                    yield self.sse_generator.generate_hscode_analysis_progress_event(
-                        "정보 분석", 25
-                    )
-                    await asyncio.sleep(0.1)
-
-                    # 전문적인 HSCode 분류 수행
-                    hscode_classification_result = await self.hscode_classification_service.perform_professional_classification(
-                        chat_request
-                    )
-
-                    # 분류 완료 이벤트
-                    yield self.sse_generator.generate_hscode_analysis_progress_event(
-                        "분류 완료", 100
-                    )
-                    await asyncio.sleep(0.1)
-
-                    # HSCode 분류 결과 이벤트 전송
-                    if hscode_classification_result and isinstance(
-                        hscode_classification_result, dict
-                    ):
-                        yield self.sse_generator.generate_hscode_classification_event(
-                            hscode=hscode_classification_result.get("hscode"),
-                            confidence_score=hscode_classification_result.get(
-                                "confidence_score"
-                            ),
-                            classification_reason=hscode_classification_result.get(
-                                "classification_reason"
-                            ),
-                            product_name=extracted_product_name,
-                            alternative_codes=hscode_classification_result.get(
-                                "alternative_codes", []
-                            ),
-                        )
-                        await asyncio.sleep(0.1)
-
-                        logger.info(
-                            f"HSCode 분류 결과 SSE 전송 완료: {hscode_classification_result.get('hscode')}"
-                        )
-
-                except Exception as hscode_error:
-                    logger.error(
-                        f"HSCode 분류 중 오류 발생: {hscode_error}", exc_info=True
-                    )
-                    # 오류 발생 시에도 기본 분류 정보 제공
-                    yield self.sse_generator.generate_hscode_classification_event(
-                        hscode=extracted_hscode,
-                        confidence_score=0.5,
-                        classification_reason="일시적 오류로 인해 정확한 분류를 완료하지 못했습니다. 추가 정보를 제공해주시면 더 정확한 분석이 가능합니다.",
-                        product_name=extracted_product_name,
-                        alternative_codes=[],
-                    )
+                # HSCode 기본 정보 추출
+                extracted_hscode, extracted_product_name = (
+                    await _extract_hscode_from_message(chat_request.message)
+                )
 
                 # HSCode 전용 프롬프트 적용
                 current_user_message.content = (

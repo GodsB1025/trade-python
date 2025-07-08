@@ -326,7 +326,7 @@ class HSCodeClassificationService:
             api_key=SecretStr(settings.ANTHROPIC_API_KEY),
             temperature=1.0,  # thinking 모드 활성화 시 1.0으로 설정 필요
             max_tokens_to_sample=12_000,  # thinking budget_tokens보다 충분히 크게 설정
-            timeout=900.0,  # 15분으로 설정 (30초 제한 해결)
+            timeout=None,
             max_retries=5,  # 재시도 횟수를 5회로 증가
             stop=None,
             streaming=True,
